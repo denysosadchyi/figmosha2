@@ -1,0 +1,55 @@
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui; padding: 8px; display: flex; flex-direction: column; height: 100vh; gap: 8px; }
+  #code { flex: 1; width: 100%; resize: none; font-family: monospace; font-size: 13px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+  #bar { display: flex; gap: 8px; align-items: center; }
+  #run { padding: 6px 20px; background: #18A0FB; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #run:hover { background: #0d8de6; }
+  #clear { padding: 6px 12px; background: #eee; border: none; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #out { font-family: monospace; font-size: 12px; padding: 6px; background: #f5f5f5; border-radius: 4px; max-height: 120px; overflow-y: auto; white-space: pre-wrap; min-height: 28px; }
+  .err { color: #e33; }
+  .ok { color: #2a2; }
+</style>
+</head>
+<body>
+  <textarea id="code" placeholder="// Figma Plugin API code here..."></textarea>
+  <div id="bar">
+    <button id="run">Run</button>
+    <button id="clear">Clear</button>
+  </div>
+  <div id="out">Ready</div>
+
+  <script>
+    const codeEl = document.getElementById('code');
+    const outEl = document.getElementById('out');
+
+    document.getElementById('run').onclick = () => {
+      outEl.textContent = 'Running...';
+      outEl.className = '';
+      parent.postMessage({ pluginMessage: { type: 'exec', code: codeEl.value } }, '*');
+    };
+
+    document.getElementById('clear').onclick = () => {
+      codeEl.value = '';
+      outEl.textContent = 'Ready';
+      outEl.className = '';
+    };
+
+    window.onmessage = (e) => {
+      const msg = e.data.pluginMessage;
+      if (!msg) return;
+      if (msg.type === 'result') {
+        outEl.textContent = msg.text;
+        outEl.className = 'ok';
+      } else if (msg.type === 'error') {
+        outEl.textContent = msg.text;
+        outEl.className = 'err';
+      } else if (msg.type === 'log') {
+        outEl.textContent += msg.text + '\n';
+      }
+    };
+  </script>
+</body>
+</html>
