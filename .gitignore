@@ -1,0 +1,19 @@
+venv/
+__pycache__/
+*.pyc
+.env
+
+# Browser state (contains auth tokens/cookies)
+.auth-state.json
+.playwright-mcp/
+
+# Runtime artifacts
+*.png
+output.txt
+
+# IDE
+.vscode/
+.idea/
+
+# MCP config (local paths/env)
+.mcp.json
