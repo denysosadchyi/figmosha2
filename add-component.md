@@ -105,6 +105,22 @@ async function bN(node, prop, varName) {
   node.setBoundVariable(prop, v);
 }
 
+// Helper: bind TEXT STYLE (from Figma local text styles)
+async function bT(node, styleName) {
+  const styles = await figma.getLocalTextStylesAsync();
+  const style = styles.find(s => s.name === styleName);
+  if (!style) return;
+  node.textStyleId = style.id;
+}
+
+// Helper: bind EFFECT STYLE (shadow etc.)
+async function bE(node, styleName) {
+  const styles = await figma.getLocalEffectStylesAsync();
+  const style = styles.find(s => s.name === styleName);
+  if (!style) return;
+  node.effectStyleId = style.id;
+}
+
 // Usage:
 const page = figma.currentPage;
 const comp = page.findOne(n => n.name === "ComponentName");
@@ -127,6 +143,14 @@ await bN(someNode, "itemSpacing", "spacing/2");
 await bN(someNode, "paddingLeft", "spacing/25");
 await bN(someNode, "width", "size/avatar");
 await bN(someNode, "height", "size/badge-height");
+
+// Bind text style to text nodes
+await bT(textNode, "body/sm/medium");  // 14px medium
+await bT(textNode, "body/xs/medium");  // 12px medium
+await bT(textNode, "body/base/regular"); // 16px regular
+
+// Bind effect style
+await bE(someNode, "shadow/sm");
 
 print("Bound OK");
 ```
@@ -263,6 +287,37 @@ python run.py "__reopen_scripter__"
 | bg-popover | semantic/popover |
 
 Badge colors: `badge/{color}-bg`, `badge/{color}-fg`
+
+## Text style mapping
+
+| Code (Tailwind) | Figma text style |
+|---|---|
+| text-xs font-medium | body/xs/medium |
+| text-xs font-normal | body/xs/regular |
+| text-sm font-medium | body/sm/medium |
+| text-sm font-normal | body/sm/regular |
+| text-base font-normal | body/base/regular |
+| text-base font-medium | body/base/medium |
+| text-lg font-medium | body/lg/medium |
+| text-xl font-medium | body/xl/medium |
+
+Button text: `text-sm font-medium` → `body/sm/medium` (sizes default/lg)
+Button text xs: `text-xs` → `body/xs/medium`
+Button text sm: `text-[0.8rem]` ≈ 13px → `body/xs/medium` (closest)
+Badge text: `text-xs font-medium` → `body/xs/medium`
+Input text: `text-base` → `body/base/regular`
+Label text: `text-sm font-medium` → `body/sm/medium`
+Tooltip text: `text-xs` → `body/xs/regular`
+
+## Effect style mapping
+
+| Code | Figma effect style |
+|---|---|
+| shadow-xs | shadow/xs |
+| shadow-sm | shadow/sm |
+| shadow-md | shadow/md |
+| shadow-lg | shadow/lg |
+| shadow-xl | shadow/xl |
 
 ## Available size variables
 
