@@ -181,29 +181,86 @@ targetFrame.appendChild(node); // reparents in place
 
 When applying Figma Variables (for design token migration pipelines):
 
-```ts
-// Bind a variable to a fill color
-const variable = figma.variables.getVariableById("VariableID:123:456");
-if (variable) {
-  node.setBoundVariable("fills", 0, variable); // index 0 = first fill
-}
+### Binding COLOR variables to fills/strokes
 
-// Bind to other properties
-node.setBoundVariable("strokeWeight", null, variable);
-node.setBoundVariable("opacity", null, variable);
+**`setBoundVariable("fills", 0, v)` does NOT work for fills/strokes.** It throws:
+`"fills and strokes variable bindings must be set on paints directly"`
+
+Use `figma.variables.setBoundVariableForPaint()` instead:
+
+```ts
+// CORRECT — bind color variable to fill
+const fills = JSON.parse(JSON.stringify(node.fills));
+fills[0] = figma.variables.setBoundVariableForPaint(fills[0], "color", variable);
+node.fills = fills;
+
+// CORRECT — bind color variable to stroke
+const strokes = JSON.parse(JSON.stringify(node.strokes));
+strokes[0] = figma.variables.setBoundVariableForPaint(strokes[0], "color", variable);
+node.strokes = strokes;
+
+// WRONG — crashes on fills/strokes
+node.setBoundVariable("fills", 0, variable); // ❌
 ```
 
-To look up a variable by name when ID is unknown:
+**Important:** `JSON.parse(JSON.stringify(...))` is required because `node.fills` returns
+a frozen array. Mutating it directly throws.
+
+### Binding FLOAT variables to numeric properties
+
+`setBoundVariable` works fine for non-paint properties:
 
 ```ts
-const collections = figma.variables.getLocalVariableCollections();
-for (const col of collections) {
+// Bind radius
+node.setBoundVariable("topLeftRadius", variable);
+node.setBoundVariable("topRightRadius", variable);
+node.setBoundVariable("bottomLeftRadius", variable);
+node.setBoundVariable("bottomRightRadius", variable);
+
+// Bind size
+node.setBoundVariable("width", variable);
+node.setBoundVariable("height", variable);
+
+// Bind other numeric props
+node.setBoundVariable("strokeWeight", variable);
+node.setBoundVariable("opacity", variable);
+node.setBoundVariable("paddingTop", variable);
+```
+
+### Building a variable lookup map
+
+```ts
+const V = {};
+for (const col of figma.variables.getLocalVariableCollections())
   for (const id of col.variableIds) {
     const v = figma.variables.getVariableById(id);
-    if (v?.name === "color/primary/500") {
-      // use v
-    }
+    if (v) V[v.name] = v;
   }
+// Usage: V["semantic/primary"], V["radius/xl"], V["spacing/4"]
+```
+
+### Helper functions (copy-paste ready)
+
+```ts
+function bF(node, varName) {
+  const v = V[varName]; if (!v || !node) return;
+  const f = JSON.parse(JSON.stringify(node.fills));
+  if (!f.length) f.push({type:"SOLID", color:{r:.5,g:.5,b:.5}});
+  f[0] = figma.variables.setBoundVariableForPaint(f[0], "color", v);
+  node.fills = f;
+}
+
+function bS(node, varName) {
+  const v = V[varName]; if (!v || !node) return;
+  const s = JSON.parse(JSON.stringify(node.strokes));
+  if (!s.length) return;
+  s[0] = figma.variables.setBoundVariableForPaint(s[0], "color", v);
+  node.strokes = s;
+}
+
+function bN(node, prop, varName) {
+  const v = V[varName]; if (!v || !node) return;
+  node.setBoundVariable(prop, v);
 }
 ```
 
@@ -424,6 +481,66 @@ INSTANCE children are skipped (they mirror the component).
 
 ---
 
+## Rule 14 — Two-Step Approach: Create First, Bind Second
+
+When building complex layouts with variable bindings, **always split into two scripts**:
+
+**Step 1 — Create the visual structure** with hardcoded colors/values:
+
+```ts
+// Use literal RGB values, no setBoundVariable calls
+rect.fills = [{type:"SOLID", color:{r:0, g:0.58, b:0.52}}];
+rect.cornerRadius = 8;
+text.fills = [{type:"SOLID", color:{r:0.05, g:0.05, b:0.05}}];
+```
+
+**Step 2 — Walk the tree and bind variables** to existing nodes:
+
+```ts
+// Find nodes by name, type, or position and bind
+const rect = section.findOne(n => n.name === "Primary" && n.type === "RECTANGLE");
+bF(rect, "semantic/primary"); // helper from Rule 7
+bN(rect, "topLeftRadius", "radius/xl");
+```
+
+**Why two steps:**
+- Mixing creation + binding in one large script makes debugging impossible —
+  if binding fails mid-way, you lose all visual work too
+- Step 1 produces a verifiable visual result (dump tree, check screenshot)
+- Step 2 can be re-run independently if bindings fail
+- Smaller scripts are more reliable in Scripter (clipboard paste + eval)
+
+**Naming convention for Step 2:** give meaningful `name` properties to frames/nodes
+in Step 1 so Step 2 can find them with `findOne(n => n.name === "...")`.
+
+---
+
+## Rule 15 — Run Propstar After Creating Component Sets
+
+After `figma.combineAsVariants()` creates a Component Set, **always** run the Propstar plugin
+to arrange variants into a clean property table:
+
+```bash
+# 1. Select the component set (via Scripter)
+python run.py --file select_component.js
+
+# 2. Run Propstar (closes Scripter, opens plugin, clicks "Create property table")
+python run.py "__plugin__:Propstar > Create property table"
+
+# 3. Wait ~15s for Propstar to finish, then re-open Scripter
+sleep 15
+python run.py "__reopen_scripter__"
+```
+
+**What Propstar does:**
+- Arranges all component variants in a visual grid/table by property values
+- Labels rows and columns with property names (Variant, Size, State, etc.)
+- Makes the component set readable and professional
+
+**When NOT to use:** If the component has fewer than 4 variants, Propstar adds no value.
+
+---
+
 ## Common Errors and Fixes
 
 | Error | Cause | Fix |
@@ -440,3 +557,15 @@ INSTANCE children are skipped (they mirror the component).
 | `$` disappears in text | Shell escapes `$` in inline code | Use `--file` for scripts with `$`, or `const D='$'` workaround |
 | Components deleted by cleanup | `children.forEach(remove)` on same page | Components on separate "Components" page — safe from cleanup |
 | Script silently fails mid-way | try/catch swallows error, partial result | Check `output.txt` tree to verify all nodes created |
+| `fills and strokes variable bindings must be set on paints directly` | `setBoundVariable("fills", 0, v)` on fills/strokes | Use `figma.variables.setBoundVariableForPaint()` instead (Rule 7) |
+| `Cannot assign to read only property` on fills | Mutating frozen `node.fills` array directly | `JSON.parse(JSON.stringify(node.fills))` before modifying |
+| Variables not applied, no error | Mixed create+bind in one large script, script truncated | Split into two scripts: create first, bind second (Rule 14) |
+| `output.txt` not updating | Scripter output panel not captured by run.py | Use `figma.notify()` for status; dump tree in separate script to verify |
+| Frame has only title, rest missing | Large script silently truncated during clipboard paste | Split script into <5KB chunks; use `--file` instead of inline |
+| `exit code 144` on server restart | pkill + start in same bash command | Split into two separate bash commands with `sleep 2` between |
+| Quick Actions doesn't open | Scripter has focus, Ctrl+/ goes to Scripter not Figma | Press Escape to close Scripter first, click on canvas, then Ctrl+/ |
+| Propstar not launching | Plugin search via Quick Actions fails while Scripter is open | Use `__plugin__:Name` command — it closes Scripter, focuses canvas, opens Quick Actions |
+| After Propstar, Scripter gone | `open_plugin` closes Scripter but doesn't reopen it | Send `__reopen_scripter__` command after plugin completes |
+| `layoutMode` props ignored | `itemSpacing`/`padding` set before `layoutMode = "VERTICAL"` | Always set `layoutMode` FIRST, then sizing, then spacing (Rule 3) |
+| `resize()` has no effect | Node not yet appended to parent | `parent.appendChild(node)` BEFORE `resize()` (Rule 2) |
+| Icon strokes wrong color | Instance icon vectors have default black stroke | Walk instance children with `findAll`, bind stroke color via `bS()` |

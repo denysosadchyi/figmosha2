@@ -26,6 +26,83 @@ SCREENSHOT_PATH = DIR / "result.png"
 FIFO_PATH = Path("/tmp/figmosha.fifo")
 
 
+async def open_plugin(page, plugin_name: str):
+    """Open a Figma plugin via Quick Actions.
+
+    Supports 'PluginName > Action' syntax to select a specific action.
+    Example: 'Propstar > Create property table'
+    """
+    parts = [p.strip() for p in plugin_name.split(">")]
+    name = parts[0]
+    action = parts[1] if len(parts) > 1 else None
+
+    # Close any open plugin/dialog
+    await page.keyboard.press("Escape")
+    await page.wait_for_timeout(500)
+    await page.keyboard.press("Escape")
+    await page.wait_for_timeout(500)
+
+    # Click on canvas to ensure focus
+    await page.mouse.click(100, 300)
+    await page.wait_for_timeout(500)
+
+    # Open Quick Actions
+    await page.keyboard.press("Control+/")
+    await page.wait_for_timeout(1500)
+
+    # Type plugin name
+    await page.keyboard.type(name, delay=50)
+    await page.wait_for_timeout(1500)
+
+    # Press Enter to open the plugin first
+    await page.keyboard.press("Enter")
+    await page.wait_for_timeout(3000)
+
+    if action:
+        # Plugin is now open — find and click the action
+        for attempt in range(3):
+            try:
+                item = page.get_by_text(action, exact=False).first
+                await item.click()
+                await page.wait_for_timeout(5000)
+                break
+            except Exception:
+                await page.wait_for_timeout(1000)
+    else:
+        await page.wait_for_timeout(3000)
+
+    # Screenshot result
+    await page.screenshot(path=str(SCREENSHOT_PATH), scale="css", type="png")
+
+
+async def reopen_scripter(page):
+    """Re-open Scripter plugin after using another plugin."""
+    await page.keyboard.press("Escape")
+    await page.wait_for_timeout(500)
+    await page.mouse.click(100, 300)
+    await page.wait_for_timeout(500)
+
+    for attempt in range(3):
+        await page.keyboard.press("Control+/")
+        await page.wait_for_timeout(1000)
+        await page.keyboard.type("Scripter", delay=50)
+        await page.wait_for_timeout(1000)
+        await page.keyboard.press("Enter")
+        await page.wait_for_timeout(3000)
+
+        scripter = page.frame_locator('iframe[title="Plugin: Scripter"]')
+        try:
+            await scripter.locator("body").wait_for(timeout=5000)
+            print("Scripter re-opened.")
+            return
+        except Exception:
+            print(f"Scripter re-open attempt {attempt + 1} failed, retrying...")
+            await page.keyboard.press("Escape")
+            await page.wait_for_timeout(1000)
+
+    print("Warning: could not re-open Scripter")
+
+
 async def scripter_exec(page, code: str):
     """Paste and run code in Scripter."""
     f4 = (
@@ -123,6 +200,20 @@ async def serve(url: str, email: str = None, password: str = None):
                 continue
             if code == "__quit__":
                 break
+            if code.startswith("__plugin__:"):
+                plugin_name = code.split(":", 1)[1].strip()
+                try:
+                    await open_plugin(page, plugin_name)
+                    print(f"Plugin '{plugin_name}' done → {SCREENSHOT_PATH}")
+                except Exception as e:
+                    print(f"Plugin error: {e}", file=sys.stderr)
+                continue
+            if code == "__reopen_scripter__":
+                try:
+                    await reopen_scripter(page)
+                except Exception as e:
+                    print(f"Reopen error: {e}", file=sys.stderr)
+                continue
             try:
                 await scripter_exec(page, code)
                 print(f"OK → {SCREENSHOT_PATH}")
