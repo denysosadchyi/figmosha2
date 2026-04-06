@@ -1,84 +1,109 @@
 # Figmosha
 
-AI-driven Figma design automation. Claude Code draws UI designs in Figma by executing Plugin API scripts through browser automation (Playwright + Scripter plugin).
+AI-автоматизація дизайну у Figma. Claude Code малює UI-компоненти у Figma, виконуючи скрипти Plugin API через браузерну автоматизацію (Playwright + плагін Scripter).
 
-## How it works
+## Як це працює
 
 ```
 Claude Code  →  run.py (Playwright/Firefox)  →  Figma Scripter  →  Figma canvas
 ```
 
-1. `run.py` launches Firefox, logs into Figma, and opens the Scripter plugin
-2. Claude Code sends Figma Plugin API scripts via a named pipe (`/tmp/figmosha.fifo`)
-3. Scripter executes the code inside Figma — creating frames, components, text, auto layouts
-4. Canvas state is read back via `output.txt` dumps (no screenshots needed)
+1. `run.py` запускає Firefox, логіниться у Figma і відкриває плагін Scripter
+2. Claude Code надсилає скрипти Figma Plugin API через named pipe (`/tmp/figmosha.fifo`)
+3. Scripter виконує код всередині Figma — створює фрейми, компоненти, текст, auto layout
+4. Стан канвасу зчитується через `output.txt` дампи (без скріншотів)
 
-## Setup
+## Встановлення
 
-### Prerequisites
+### Вимоги
 
 - Python 3.10+
 - Playwright (`pip install playwright && playwright install firefox`)
-- Xvfb for headless Linux (`sudo apt install xvfb`)
-- A Figma account with the [Scripter](https://www.figma.com/community/plugin/757836922707087381) plugin installed
+- Xvfb для headless Linux (`sudo apt install xvfb`)
+- Акаунт Figma з встановленим плагіном [Scripter](https://www.figma.com/community/plugin/757836922707087381)
 
-### Linux (AppArmor fix)
+### Linux (AppArmor фікс)
 
 ```bash
 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 ```
 
-### Virtual display
+### Віртуальний дисплей
 
 ```bash
 Xvfb :99 -screen 0 1920x1080x24 &
 ```
 
-### Start the server
+### Запуск сервера
 
 ```bash
 DISPLAY=:99 python -u run.py --serve FIGMA_FILE_URL EMAIL PASSWORD
 ```
 
-### Execute code
+### Виконання коду
 
 ```bash
 # Inline
 python run.py "figma.createRectangle()"
 
-# From file
+# З файлу
 python run.py --file script.js
 ```
 
-## Project structure
+### Плагіни та Propstar
 
-```
-run.py          — Playwright server: browser automation + fifo listener
-scripter.md     — Comprehensive rules for generating Figma Scripter code
-CLAUDE.md       — Instructions for Claude Code sessions
-plugin/         — Custom Figma plugin (alternative to Scripter)
-  code.js       — Plugin backend (eval + print)
-  ui.html       — Plugin UI (code editor + output)
-  manifest.json — Plugin manifest
+```bash
+# Запустити плагін (наприклад Propstar)
+python run.py "__plugin__:Propstar > Create property table"
+
+# Перевідкрити Scripter після плагіна
+python run.py "__reopen_scripter__"
 ```
 
-## Key concepts
+## Структура проєкту
 
-- **Components page**: All reusable Figma components live on a dedicated "Components" page, not on the working canvas
-- **No screenshots by default**: Canvas state is inspected via tree dumps to `output.txt`, saving ~1000 tokens per operation
-- **Clipboard paste**: Code is injected via clipboard (`navigator.clipboard.writeText` + Ctrl+V) for speed
-- **Cross-page components**: `figma.currentPage` must be switched before `createComponent()` — nodes can't be transferred across pages via `appendChild()`
+```
+run.py              — Playwright сервер: автоматизація браузера + fifo listener
+scripter.md         — Правила генерації коду для Figma Scripter
+add-component.md    — Універсальний пайплайн додавання компонентів з коду в Figma
+CLAUDE.md           — Інструкції для сесій Claude Code
+plugin/             — Кастомний Figma плагін (альтернатива Scripter)
+  code.js           — Бекенд плагіна (eval + print)
+  ui.html           — UI плагіна (редактор коду + вивід)
+  manifest.json     — Маніфест плагіна
+```
 
-## Scripter rules
+## Ключові концепти
 
-See [`scripter.md`](scripter.md) for the full set of rules that prevent runtime crashes and silent failures when generating Figma Plugin API code. Highlights:
+- **Два етапи**: Створення візуальної структури (Step 1) окремо від прив'язки змінних (Step 2) — змішування в одному скрипті призводить до мовчазних збоїв
+- **Без скріншотів**: Стан канвасу перевіряється через `print()` дампи в Scripter, а не скріншоти — економить токени і надійніше
+- **Атомарний підхід**: Складні компоненти збираються з інстансів атомарних компонентів. Стилі прив'язуються лише на атомах — інстанси наслідують автоматично
+- **Figma Variables**: Всі кольори, радіуси, розміри прив'язуються до Figma Variables через `setBoundVariableForPaint()` (fills/strokes) та `setBoundVariable()` (числові)
+- **Text Styles**: Всі тексти отримують локальні Figma Text Styles (body/sm/medium, heading/h1/bold тощо)
+- **Propstar**: Після створення Component Set обов'язково запускається Propstar для розкладки варіантів у сітку
+- **Clipboard paste**: Код інжектиться через clipboard (`navigator.clipboard.writeText` + Ctrl+V)
 
-- Always load fonts before text operations
-- `appendChild()` before `resize()` or layout properties
-- Set `layoutMode` before any auto layout props
-- Colors use 0-1 RGB, not hex strings
-- Use `findOne()` for text overrides in instances (not `setProperties()`)
+## Правила Scripter
 
-## License
+Див. [`scripter.md`](scripter.md) — повний набір правил для запобігання runtime помилкам:
+
+- Завантажити шрифти перед текстовими операціями
+- `appendChild()` перед `resize()` або layout властивостями
+- `layoutMode` перед будь-якими auto layout пропсами
+- Кольори в RGB 0-1, не hex
+- `findOne()` для текстових overrides в інстансах
+
+## Пайплайн додавання компонентів
+
+Див. [`add-component.md`](add-component.md) — універсальний пайплайн:
+
+```
+Прочитати код → Step 1 (створити) → Перевірити розміри →
+Step 2 (прив'язати змінні) → Перевірити прив'язки → Propstar
+```
+
+Включає маппінг кольорів, радіусів, текстових стилів, хелпери `bF()`, `bS()`, `bN()`, `bT()`, `bR()`, `bE()`, таблицю типових помилок.
+
+## Ліцензія
 
 MIT
