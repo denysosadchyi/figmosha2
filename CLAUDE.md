@@ -174,6 +174,21 @@ f.paddingTop = 24;
 
 ---
 
+## Коментарі Figma
+
+Для читання коментарів використовуй Figma REST API (див. `figma-comments.md`).
+**Потрібен токен** — якщо його немає, попроси користувача:
+
+> Щоб читати коментарі з Figma, мені потрібен REST API токен. Згенеруй на https://www.figma.com/developers/api#access-tokens і скинь сюди.
+
+```bash
+curl -s -H "X-Figma-Token: TOKEN" "https://api.figma.com/v1/files/FILE_KEY/comments"
+```
+
+Фільтруй по `resolved_at` — показуй тільки невирішені.
+
+---
+
 ## MCP fallback
 
 Якщо run.py недоступний — один `browser_run_code` з clipboard paste + Run.
