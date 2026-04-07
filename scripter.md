@@ -59,6 +59,22 @@ const t = figma.createText();
 t.characters = "Hello"; // ❌
 ```
 
+**Custom/team fonts (Gilroy, etc.):** when editing existing text nodes, always read the font
+from the node itself — never hardcode the font name. Use `.then()` instead of `await` for
+reliability with custom fonts:
+
+```ts
+// CORRECT — read font from node, use .then()
+const n = figma.getNodeById("109:1743");
+figma.loadFontAsync(n.fontName).then(() => {
+  n.characters = "New text";
+  figma.notify("OK: " + n.characters);
+}).catch(e => figma.notify("ERR: " + e.message, {error: true}));
+
+// WRONG — hardcoding custom font name may fail silently
+await figma.loadFontAsync({ family: "Gilroy", style: "Medium" }); // ❌ may not resolve
+```
+
 If multiple fonts are needed, load them all in parallel:
 
 ```ts
@@ -569,3 +585,4 @@ python run.py "__reopen_scripter__"
 | `layoutMode` props ignored | `itemSpacing`/`padding` set before `layoutMode = "VERTICAL"` | Always set `layoutMode` FIRST, then sizing, then spacing (Rule 3) |
 | `resize()` has no effect | Node not yet appended to parent | `parent.appendChild(node)` BEFORE `resize()` (Rule 2) |
 | Icon strokes wrong color | Instance icon vectors have default black stroke | Walk instance children with `findAll`, bind stroke color via `bS()` |
+| `loadFontAsync` fails on custom font | Hardcoded `{family:"Gilroy",style:"Medium"}` with `await` | Read `n.fontName` from node directly, use `.then()` instead of `await` |
