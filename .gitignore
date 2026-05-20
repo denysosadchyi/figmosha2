@@ -3,17 +3,14 @@ __pycache__/
 *.pyc
 .env
 
-# Browser state (contains auth tokens/cookies)
-.auth-state.json
-.playwright-mcp/
-
 # Runtime artifacts
-*.png
-output.txt
+/tmp/figmosha-bridge.log
+*.log
 
-# IDE
+# Editor / IDE
 .vscode/
 .idea/
+.DS_Store
 
-# MCP config (local paths/env)
+# Local MCP config
 .mcp.json
