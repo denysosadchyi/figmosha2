@@ -26,6 +26,46 @@ PENDING: dict = {}        # rid -> {"future", "logs", "t0"}
 PLUGIN_WS: web.WebSocketResponse | None = None
 
 
+ERROR_HINTS = [
+    ("fills and strokes variable bindings must be set on paints directly",
+     "use h.bF(node, idx, varId) to bind a fill paint to a variable"),
+    ("strokes variable bindings must be set on paints directly",
+     "use h.bS(node, idx, varId) to bind a stroke paint to a variable"),
+    ("Cannot assign to read only property",
+     "node.fills/strokes is frozen — copy via JSON.parse(JSON.stringify(...)) before mutating, or use h.bF()/h.bS()"),
+    ("permission not specified in manifest",
+     "manifest.json missing a permission — edit plugin/manifest.json, sync to /mnt/c/Users/User/figmosha-plugin/, then re-import the plugin in Figma"),
+    ("unloaded font",
+     "use h.setText(node, text) or h.withFonts(root, fn) — they autoload fonts. Or manually: await figma.loadFontAsync(node.fontName)"),
+    ("font has not been loaded",
+     "use h.setText(node, text) or h.withFonts(root, fn) — they autoload fonts"),
+    ("Cannot find font",
+     "fontName may be missing or mixed — check node.fontName before loading"),
+    ("appendChild",
+     "create node, then parent.appendChild(node) BEFORE setting layoutMode/resize/itemSpacing/padding"),
+    ("Unable to find a variant",
+     "no variant matches those property values — check available: const v = await h.variantsOf(instance); return v.groups"),
+    ("Invalid property name",
+     "check available variants: const v = await h.variantsOf(instance); return v.groups"),
+    ("Invalid value",
+     "check variant values: const v = await h.variantsOf(instance); return v.groups"),
+    ("setProperties",
+     "if 'Unable to find variant' — check available values via h.variantsOf(instance)"),
+    ("not a function",
+     "API may be deprecated or renamed — check figma.* available methods, or use Async variants"),
+]
+
+
+def find_hint(error_text):
+    if not error_text:
+        return None
+    low = error_text.lower()
+    for needle, hint in ERROR_HINTS:
+        if needle.lower() in low:
+            return hint
+    return None
+
+
 async def plugin_ws_handler(request: web.Request) -> web.WebSocketResponse:
     global PLUGIN_WS
     ws = web.WebSocketResponse(heartbeat=20, max_msg_size=16 * 1024 * 1024)
@@ -125,10 +165,12 @@ async def exec_handler(request: web.Request) -> web.Response:
     elapsed_ms = int((time.time() - entry["t0"]) * 1000)
 
     if result.get("type") == "error":
+        error_text = result.get("text", "unknown error")
         return web.json_response(
             {
                 "ok": False,
-                "error": result.get("text", "unknown error"),
+                "error": error_text,
+                "hint": find_hint(error_text),
                 "stack": result.get("stack"),
                 "logs": entry["logs"],
                 "elapsed_ms": elapsed_ms,
