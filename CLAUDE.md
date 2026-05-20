@@ -1,202 +1,149 @@
-# Figmosha — інструкції для Claude Code
+# Figmosha 2.0 — Claude Code instructions
 
-## Що це
+Drive Figma by sending JS code through a local bridge that's connected to a custom plugin running inside Figma Desktop.
 
-Малюємо дизайн у Figma через Scripter плагін (Figma Plugin API).
-Правила генерації коду — в `scripter.md` (скіл figma-scripter).
-
-## run.py — основний спосіб
-
-Окремий Python-процес тримає Firefox з Figma і Scripter.
-
-### Запуск сервера (раз, в окремому терміналі)
+## How to send code
 
 ```bash
-DISPLAY=:99 python -u run.py --serve FIGMA_URL EMAIL PASSWORD
+# Inline
+python figmosha.py "return figma.currentPage.name"
+
+# Multi-line (heredoc / file)
+python figmosha.py --file script.js
+
+# Quick HTTP (no Python needed)
+curl -s -X POST http://localhost:8787/exec \
+  -H 'Content-Type: application/json' \
+  -d '{"code":"return figma.currentPage.id"}'
+
+# Status
+curl -s http://localhost:8787/status   # {"plugin_connected": true/false, "pending": 0}
 ```
 
-### Виконання коду
+If the bridge isn't running: `bash start-bridge.sh` (runs in tmux session `figmosha-bridge`; logs at `/tmp/figmosha-bridge.log`).
 
-```bash
-python run.py "figma plugin api код"        # inline
-python run.py --file script.js              # з файлу (рекомендовано)
+If the plugin isn't connected: tell the user to open it — `Plugins → Development → Figmosha Bridge → Run`.
+
+## How code is evaluated
+
+```js
+new Function('figma', 'print', `return (async () => { <YOUR CODE> })();`)(figma, print)
 ```
 
-### Запуск плагінів (Propstar і т.д.)
+- Whatever you `return` becomes the `result` field of the HTTP response (stringified for display; raw value also returned as `value` if JSON-serializable).
+- `await` works everywhere — body is wrapped in an async IIFE.
+- `print(...args)` collects log lines (returned in the `logs` array).
+- Exceptions become `{ok:false, error, stack}` with HTTP 500.
 
-```bash
-python run.py "__plugin__:Propstar > Create property table"
-python run.py "__reopen_scripter__"   # після плагіна
+## Conventions
+
+### Just `return` — no print dance
+
+```js
+// good
+return figma.currentPage.children.map(n => ({id:n.id, name:n.name, type:n.type}))
+
+// avoid (v1 leftover style — print() exists but is rarely needed)
+print("page name:", figma.currentPage.name)
 ```
 
-### Без скріншотів
+### Use Async APIs
 
-Не робити скріншот якщо користувач не просить побачити результат.
-`figma.notify()` в try/catch підтвердить успіх. Сервер виводить "OK".
+The plugin runs under documentAccess: dynamic-page where most node lookups are async:
 
----
-
-## Ключові правила та як уникати помилок
-
-### 1. Два етапи для складних макетів (ОБОВ'ЯЗКОВО)
-
-**Проблема:** великий скрипт з `setBoundVariableForPaint` + створення нод падає мовчки, створюються тільки перші кілька елементів, решта зникає без помилки.
-
-**Рішення:** завжди розділяти на два скрипти:
-1. **Скрипт 1** — створити ВСЮ візуальну структуру з хардкод RGB кольорами
-2. **Скрипт 2** — пройтись по нодах через `findOne/findAll` і прив'язати змінні
-
-**Чому:** якщо binding впаде, візуал вже створений і не втрачається. Кожен крок можна перевірити окремо.
-
-### 2. Прив'язка змінних до fills/strokes
-
-**Проблема:** `node.setBoundVariable("fills", 0, v)` кидає помилку:
-`"fills and strokes variable bindings must be set on paints directly"`
-
-**Рішення:** використовувати `figma.variables.setBoundVariableForPaint()`:
-```ts
-const f = JSON.parse(JSON.stringify(node.fills));
-f[0] = figma.variables.setBoundVariableForPaint(f[0], "color", v);
-node.fills = f;
+```js
+const node = await figma.getNodeByIdAsync(id)
+const main = await instance.getMainComponentAsync()
+const cols = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync()
+const comp = await figma.importComponentByKeyAsync(key)
 ```
 
-**Чому `JSON.parse(JSON.stringify(...))`:** `node.fills` повертає frozen array — пряма мутація кидає `Cannot assign to read only property`.
+`figma.getNodeById` (sync) still works for already-loaded nodes but prefer the async forms.
 
-**Для числових пропертів** (radius, width, height, padding) — `setBoundVariable` працює нормально:
-```ts
-node.setBoundVariable("topLeftRadius", v);
+### Auto-Layout: order matters
+
+`resize()` / spacing / sizing modes are ignored if set before `layoutMode`. Strict order:
+
+```js
+const f = figma.createFrame()
+parent.appendChild(f)            // 1. into tree first
+f.layoutMode = "VERTICAL"        // 2. layoutMode
+f.resize(400, 100)               // 3. size
+f.primaryAxisSizingMode = "AUTO" // 4. sizing
+f.itemSpacing = 16               // 5. spacing/padding
+f.paddingTop = 24
 ```
 
-Детально — `scripter.md`, Rule 7.
+### Font loading before text ops
 
-### 3. Перевірка результату після кожного скрипта
-
-**Проблема:** `output.txt` часто не оновлюється (Scripter output panel кешує старий вивід). Дивишся на нього і думаєш що скрипт не спрацював, або навпаки.
-
-**Рішення:**
-- `figma.notify("msg")` — завжди видно на скріншоті (зелена/червона панель внизу)
-- Окремий dump-скрипт для верифікації структури (print дерева нод)
-- `tail -N /tmp/figmosha.log` — сервер друкує "OK" або "Error" після кожного виконання
-- Скріншот (`result.png`) — останній засіб, якщо все інше не працює
-
-### 4. Іменування нод для Step 2
-
-**Проблема:** в Step 2 (binding) потрібно знайти конкретні ноди. Без імен — неможливо.
-
-**Рішення:** в Step 1 давати осмислені `name` кожному фрейму/прямокутнику:
-```ts
-row.name = "Semantic";        // findOne(n => n.name === "Semantic")
-swatch.name = "Primary";      // findOne(n => n.name === "Primary")
-pill.name = "Blue";            // findOne(n => n.name === "Blue")
+```js
+await figma.loadFontAsync(node.fontName)
+node.characters = "..."
 ```
 
-### 5. Propstar після кожного Component Set
+Mixed-font text: load each unique font in the range or set the whole thing to a single font first.
 
-**Проблема:** без Propstar Component Set — це вертикальна стрічка з 100+ варіантів, в якій нічого не зрозуміло.
+### Fills binding (variables)
 
-**Рішення:** після `figma.combineAsVariants()` обов'язково:
-```bash
-# 1. Виділити компонент (через Scripter)
-python run.py --file select_component.js
+`node.setBoundVariable("fills", 0, v)` does NOT work. Use the paint helper:
 
-# 2. Запустити Propstar
-python run.py "__plugin__:Propstar > Create property table"
-
-# 3. Зачекати ~15с, потім перевідкрити Scripter
-sleep 15
-python run.py "__reopen_scripter__"
+```js
+const f = JSON.parse(JSON.stringify(node.fills))   // unfreeze
+f[0] = figma.variables.setBoundVariableForPaint(f[0], "color", v)
+node.fills = f
 ```
 
-**Що робить Propstar:** розкладає всі варіанти в сітку по properties (Variant × Size × State), підписує рядки і колонки.
+For numeric props (radii, padding, size) — `node.setBoundVariable("topLeftRadius", v)` works directly.
 
-### 6. Перезапуск сервера
+### Two-stage workflow for big builds
 
-**Проблема:** `pkill -f "run.py --serve"` з наступним стартом часто дає `exit code 144`.
+For complex builds (component sets with many variants + variable binding): split into Step 1 = build visual structure with hardcoded RGB; Step 2 = walk nodes by `name` and bind variables. Mixing both in one call still sometimes fails silently — easier to verify each step.
 
-**Рішення:** запускати в два кроки:
-```bash
-# Крок 1 — kill (може дати 144, це ОК)
-pkill -f "run.py --serve" 2>/dev/null; sleep 2; rm -f /tmp/figmosha.fifo
+Name nodes meaningfully in Step 1 so Step 2 can `findOne(n => n.name === "...")` them.
 
-# Крок 2 — start (окрема команда)
-cd /home/den/figmosha && source venv/bin/activate && \
-  DISPLAY=:99 python -u run.py --serve "FIGMA_URL" > /tmp/figmosha.log 2>&1 &
+### Variant changes on instances
+
+```js
+await instance.setProperties({"Property 1": "Default"})
 ```
 
-Чекати ~40-50с на повний старт (Figma load + Scripter open).
+Look up valid values via the component set:
 
-### 7. Розмір скриптів
-
-**Проблема:** дуже великі скрипти (>8KB) можуть мовчки обрізатись при clipboard paste в Scripter.
-
-**Рішення:**
-- Використовувати `--file` замість inline коду
-- Якщо скрипт >5KB — розбити на кілька менших
-- Мінімізувати код: короткі імена змінних, без зайвих пробілів
-- Хелпери (`bF`, `bS`, `bN`) замість повних викликів
-
-### 8. Радіуси в Aethra DS: --radius = 4px
-
-**Проблема:** `rounded-lg` за замовчуванням в Tailwind = 8px, але в цій дизайн-системі `--radius: 0.25rem` = 4px. Тому `rounded-lg = var(--radius) = 4px`.
-
-**Таблиця:**
-- `rounded` (Tailwind default) = `var(--radius)` = **4px** → використати `radius/lg`
-- `rounded-sm` = `calc(var(--radius) - 4px)` = **0px** → `radius/sm`
-- `rounded-md` = `calc(var(--radius) - 2px)` = **2px** → `radius/md`
-- `rounded-lg` = `var(--radius)` = **4px** → `radius/lg` (НЕ 8px!)
-- `rounded-xl` = `calc(var(--radius) + 4px)` = **8px** → `radius/xl`
-
-**Як перевіряти:** через Playwright `getComputedStyle(el).borderRadius` на rendered компоненті — це єдине джерело правди для обчислених значень.
-
-### 9. Аудит через Scripter текстом (без скріншотів)
-
-**Як:** запустити скрипт який `print()` дерево нод з розмірами, потім зчитати `output.txt`.
-
-**Важливо:**
-- `print()` в Scripter виводить тільки один виклик (останній перезаписує попередній)
-- Тому збирати все в один `print(lines.join("\\n"))`
-- Символи Unicode (❖) ламають `String()` конкатенацію → санітизувати через `.replace(/[^\\x20-\\x7E]/g, "")`
-
-### 10. Порядок створення Auto Layout фрейму
-
-**Проблема:** `resize()`, `itemSpacing`, `paddingTop` і т.д. ігноруються якщо встановлені ДО `layoutMode`.
-
-**Рішення:** строгий порядок:
-```ts
-const f = figma.createFrame();
-parent.appendChild(f);          // 1. Спочатку додати в дерево
-f.layoutMode = "VERTICAL";      // 2. Потім layoutMode
-f.resize(400, 100);             // 3. Потім розмір
-f.primaryAxisSizingMode = "AUTO"; // 4. Потім sizing mode
-f.itemSpacing = 16;             // 5. Потім spacing/padding
-f.paddingTop = 24;
+```js
+const main = await instance.getMainComponentAsync()
+return main.parent.variantGroupProperties   // {"Property 1": {values: [...]}}
 ```
 
----
+### Reading is cheap, mutating is moderate
 
-## Коментарі Figma
+Roundtrip overhead: ~3–7 ms (read), ~30–80 ms (single mutation including Figma render). Batch mutations into one `/exec` call when possible — fewer roundtrips, but the bigger win is that Figma collapses them into one undo step.
 
-Для читання коментарів використовуй Figma REST API (див. `figma-comments.md`).
-**Потрібен токен** — якщо його немає, попроси користувача:
+### Don't take screenshots for verification
 
-> Щоб читати коментарі з Figma, мені потрібен REST API токен. Згенеруй на https://www.figma.com/developers/api#access-tokens і скинь сюди.
+The bridge returns the data you need. Verify by:
 
-```bash
-curl -s -H "X-Figma-Token: TOKEN" "https://api.figma.com/v1/files/FILE_KEY/comments"
+```js
+// Verify what was created/changed
+return figma.currentPage.findOne(n => n.name === "...").width
+return root.findAll(n => n.type === "TEXT").map(t => t.characters)
 ```
 
-Фільтруй по `resolved_at` — показуй тільки невирішені.
+`node.exportAsync({format:"PNG"})` exists if you genuinely need pixels — returns bytes you can save server-side. Don't use it as a "is the code working" check.
 
----
+## When something looks wrong
 
-## MCP fallback
+- **`plugin not connected` (503)**: plugin window closed in Figma. Ask user to Run it again.
+- **Timeout (504)**: probably an infinite loop or unresolved `await`. Ask user to close & re-run the plugin.
+- **`teamlibrary permission not specified`** (or similar): manifest needs a new permission. Edit `plugin/manifest.json`, sync to user's Windows copy (`/mnt/c/Users/User/figmosha-plugin/manifest.json` on their WSL), ask user to **re-import** the plugin (Plugins → Development → Manage plugins in development → remove → Import again).
+- **Result looks weird / undefined**: you forgot `return`. The wrapper expects a value.
+- **Switch Figma file → plugin disconnects**: plugin is bound to the open file. After switching, ask user to Run plugin again.
 
-Якщо run.py недоступний — один `browser_run_code` з clipboard paste + Run.
+## Where things live (user's setup)
 
-Firefox: `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0`
-Профіль зайнятий: `pkill -f "firefox.*mcp-firefox"`
+- Bridge: `~/figmosha2/` on WSL Ubuntu at `192.168.31.105` (passwordless ssh as `user`)
+- Plugin source: `~/figmosha2/plugin/`
+- Plugin Windows-side (for Figma to import): `C:\Users\User\figmosha-plugin\`
+- Tmux session: `figmosha-bridge`
+- Log: `/tmp/figmosha-bridge.log` on WSL
 
-## Браузер
-
-Playwright MCP з Firefox. Конфіг у `.mcp.json`.
-Xvfb віртуальний дисплей (`DISPLAY=:99`) для headed режиму.
+To restart bridge from this dev machine: `ssh user@192.168.31.105 'bash ~/figmosha2/start-bridge.sh'`.
