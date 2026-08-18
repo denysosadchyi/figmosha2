@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start (or restart) the Figmosha bridge inside a detached tmux session.
-# Run from WSL: bash ~/figmosha2/start-bridge.sh
+# Usage: bash ~/figmosha2/start-bridge.sh   (also run automatically by the Claude Code SessionStart hook)
 set -e
 SESSION="figmosha-bridge"
 cd "$(dirname "$0")"
