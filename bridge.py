@@ -302,7 +302,11 @@ async def status_handler(request: web.Request) -> web.Response:
     })
 
 
-async def root_handler(_request: web.Request) -> web.Response:
+async def root_handler(request: web.Request) -> web.Response:
+    blocked = _guard(request)
+    if blocked is not None:
+        return blocked
+
     return web.json_response({
         "service": "figmosha-bridge",
         "version": "2.0",
