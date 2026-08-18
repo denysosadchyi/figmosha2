@@ -5,6 +5,7 @@ Drive Figma from your terminal / Claude Code / any HTTP client. A tiny custom pl
 No clipboard hacks. No screenshots.
 
 Fast enough to feel synchronous: reads ~5 ms, mutations ~30 ms, library component import ~150 ms.
+
 <img width="1139" height="875" alt="image" src="https://github.com/user-attachments/assets/9aafc38c-39b8-4657-a7b6-c6fc94ea0805" />
 
 ## Why this exists
