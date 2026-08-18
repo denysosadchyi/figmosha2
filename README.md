@@ -12,22 +12,34 @@ The Figma Plugin API is the most stable and powerful interface Figma offers. Tho
 
 Figmosha 2.0 keeps a plugin permanently open in Figma and exposes its Plugin API through a local network socket. You write code in your editor / Claude / a script, it runs inside Figma, and the result comes back to you.
 
+```mermaid
+flowchart LR
+    subgraph client["PowerShell · curl · Claude Code"]
+        CLI["figmosha.py<br/>or any HTTP client"]
+    end
+
+    subgraph bridge["bridge.py — 127.0.0.1:8787"]
+        HTTP["HTTP server<br/>/exec · /status"]
+        WSS["WS server<br/>/plugin"]
+    end
+
+    subgraph figma["Figma Desktop — open file"]
+        PLUGIN["Figmosha Bridge<br/>(plugin)"]
+        API["Figma Plugin API"]
+    end
+
+    CLI -- "POST /exec<br/>{ code }" --> HTTP
+    HTTP --> WSS
+    WSS -- "ws://localhost" --> PLUGIN
+    PLUGIN --> API
+
+    API -.-> PLUGIN
+    PLUGIN -. "result · logs" .-> WSS
+    WSS -.-> HTTP
+    HTTP -. "{ ok, result, value,<br/>logs, elapsed_ms, hint? }" .-> CLI
 ```
-PowerShell / curl / Claude Code     bridge.py (Python)         Figma Desktop
-───────────────────────────         ─────────────────          ─────────────
-                                                               ┌────────────┐
-   POST /exec  ──────────────►   HTTP server                   │ open file  │
-                                    │                          │            │
-                                    ▼                          │ ┌────────┐ │
-                                 WS server  ──ws://localhost── ┤ │Figmosha│ │
-                                                               │ │ Bridge │ │
-                                    ▲                          │ │(plugin)│ │
-                                    │                          │ └───┬────┘ │
-   ◄──── HTTP response                                         │     │      │
-        {ok, result, value, logs, elapsed_ms, hint?}            │     ▼      │
-                                                               │ Plugin API │
-                                                               └────────────┘
-```
+
+Solid arrows carry the request, dotted ones the response.
 
 ## Highlights
 
@@ -47,79 +59,36 @@ PowerShell / curl / Claude Code     bridge.py (Python)         Figma Desktop
 
 ## Install
 
-### 1. Clone the repo
+Hand this repo to Claude Code and let it do the setup:
+
+```
+https://github.com/denysosadchyi/figmosha2 — set this up for me
+```
+
+It clones the repo, creates the venv, installs `aiohttp`, starts the bridge, and tells you what to click in Figma. `CLAUDE.md` in the repo root is written for exactly this — Claude reads it and knows the whole workflow, including the WSL2 path juggling if that's your setup.
+
+Two things Claude cannot do for you, because Figma exposes no API for either:
+
+1. **Import the plugin** — in Figma Desktop: **Plugins → Development → Import plugin from manifest…**, pick `plugin/manifest.json` from the repo. Once, ever.
+2. **Run the plugin** — **Plugins → Development → Figmosha Bridge**. A small green **Connected** bar appears; the bridge logs `[plugin] connected from 127.0.0.1`. You're live.
+
+Ask Claude for the smoke test and it will confirm the round trip works end to end.
+
+<details>
+<summary>Prefer to do it by hand?</summary>
 
 ```bash
 git clone https://github.com/denysosadchyi/figmosha2.git
 cd figmosha2
+
+python3 -m venv venv && ./venv/bin/pip install aiohttp   # macOS / Linux / WSL
+python  -m venv venv && .\venv\Scripts\pip install aiohttp   # Windows
+
+bash start-bridge.sh        # detached tmux session "figmosha-bridge"
+./venv/bin/python bridge.py # …or just keep a terminal open
 ```
 
-### 2. Set up Python
-
-**macOS / Linux:**
-
-```bash
-python3 -m venv venv
-./venv/bin/pip install aiohttp
-```
-
-**Windows (native PowerShell):**
-
-```powershell
-python -m venv venv
-.\venv\Scripts\pip install aiohttp
-```
-
-**Windows + WSL2** (recommended if you already use WSL): same as macOS/Linux inside WSL. WSL2 auto-forwards `localhost` ports to the Windows host, so Figma Desktop (running on Windows native) can reach the bridge running inside WSL transparently.
-
-### 3. Import the plugin into Figma
-
-1. Open **Figma Desktop**
-2. Open any file (or create a new one)
-3. Top menu → **Plugins** → **Development** → **Import plugin from manifest…**
-4. Select `plugin/manifest.json` from this repo
-
-Figma registers "Figmosha Bridge" under `Plugins → Development`. You only do this once.
-
-**WSL2 note**: if your repo lives in WSL but Figma runs on Windows native, copy `plugin/` to a Windows-accessible path first:
-
-```bash
-mkdir -p /mnt/c/Users/$WIN_USER/figmosha-plugin
-cp plugin/* /mnt/c/Users/$WIN_USER/figmosha-plugin/
-```
-
-Then import `C:\Users\<your-name>\figmosha-plugin\manifest.json` in Figma.
-
-### 4. Start the bridge
-
-```bash
-# macOS / Linux / WSL
-bash start-bridge.sh
-# starts in a detached tmux session "figmosha-bridge"
-
-# OR: just run it in a terminal you keep open
-./venv/bin/python bridge.py
-
-# Windows native (no tmux)
-.\venv\Scripts\python bridge.py
-```
-
-The server listens on `127.0.0.1:8787`. Output:
-
-```
-[bridge] listening on http://127.0.0.1:8787
-[bridge] plugin should connect to ws://localhost:8787/plugin
-```
-
-### 5. Run the plugin in Figma
-
-In Figma Desktop: **Plugins** → **Development** → **Figmosha Bridge** → **Run**.
-
-A small window appears: **bridge: connected** (green). In the server terminal you'll see `[plugin] connected from 127.0.0.1`. You're live.
-
-### 6. Smoke test
-
-In a second terminal:
+The server listens on `127.0.0.1:8787`. Import and run the plugin as described above, then check it:
 
 ```bash
 ./venv/bin/python figmosha.py status
@@ -127,12 +96,18 @@ In a second terminal:
 
 ./venv/bin/python figmosha.py "return figma.currentPage.name"
 # → "Page 1"
-
-./venv/bin/python figmosha.py "const r = figma.createRectangle(); r.x = 100; r.y = 100; r.resize(200, 100); r.name = 'smoketest'; return r.id"
-# → "1:23"  (and a rectangle appears in Figma)
 ```
 
-If all three work — you're done.
+**WSL2**: `localhost` ports forward to the Windows host automatically, so a bridge inside WSL is reachable from Figma on Windows. But Figma can only import a plugin from a Windows path — copy it out first:
+
+```bash
+mkdir -p /mnt/c/Users/$WIN_USER/figmosha-plugin
+cp plugin/* /mnt/c/Users/$WIN_USER/figmosha-plugin/
+```
+
+Then import `C:\Users\<your-name>\figmosha-plugin\manifest.json`.
+
+</details>
 
 ## Daily use
 
