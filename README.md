@@ -45,8 +45,9 @@ Solid arrows carry the request, dotted ones the response.
 
 - **One Python file** server + **one Python file** CLI, ~500 lines total. No npm. No frameworks.
 - **Custom Figma plugin**, ~250 lines (JS + HTML). Imported in dev mode — no publishing.
-- **15 helpers** baked into the plugin runtime as `h.*` so scripts stay short and safe (`h.bF`, `h.setText`, `h.withFonts`, `h.cloneNext`, `h.variantsOf`, …).
-- **9 high-level CLI subcommands** for common ops (`tree`, `find`, `text`, `variant`, `clone`, `rm`, `icomp`, …).
+- **20 helpers** baked into the plugin runtime as `h.*` so scripts stay short and safe (`h.bF`, `h.setText`, `h.withFonts`, `h.frame`, `h.hex`, `h.sel`, …).
+- **11 high-level CLI subcommands** for common ops (`doctor`, `sel`, `tree`, `find`, `text`, `variant`, `clone`, `rm`, `icomp`, …).
+- **`figmosha doctor`** walks the whole chain — bridge, plugin, round trip, which file is open — and names the fix at whichever link is broken.
 - **Smart error hints** in responses — when a script fails with a known-pattern error, the response includes a `hint` field telling you how to fix it.
 - **Works while Figma is minimized.** WebSocket stays alive; JavaScript keeps executing in the background.
 - **Auto-reconnect** in the plugin UI — restart the server, plugin reconnects within 2 s.
@@ -114,7 +115,8 @@ Then import `C:\Users\<your-name>\figmosha-plugin\manifest.json`.
 ### Start a session
 
 ```bash
-bash start-bridge.sh   # or however you start the bridge
+bash start-bridge.sh     # macOS / Linux / WSL — detached tmux session
+.\start-bridge.ps1       # native Windows — detached, -Restart / -Stop too
 # In Figma: Plugins → Development → Figmosha Bridge → Run
 ```
 
@@ -143,7 +145,10 @@ curl -s http://localhost:8787/exec \
 When the operation fits one of these, use the dedicated subcommand — much less typing and less risk of escape bugs:
 
 ```bash
-python figmosha.py tree 1:23 --depth 2          # dump subtree
+python figmosha.py doctor                        # diagnose the chain, with fixes
+python figmosha.py sel                           # what's selected in Figma right now
+python figmosha.py tree 1:23 --depth 2           # dump subtree
+python figmosha.py tree sel --layout             # subtree of the selection, with layout
 python figmosha.py find 1:23 name=Button         # find by exact name
 python figmosha.py find 1:23 name~Btn            # substring name match
 python figmosha.py find 1:23 type=INSTANCE       # filter by type
@@ -151,7 +156,7 @@ python figmosha.py find 1:23 text~hello          # find TEXT containing "hello"
 python figmosha.py text 1:25 "new content"       # set TEXT chars (autoloads fonts)
 python figmosha.py variant 1:30 "Property 1=Default"
 python figmosha.py clone 1:23 --right --gap 100  # clone adjacent
-python figmosha.py rm 1:99                       # delete a node
+python figmosha.py rm 1:99 1:100 1:101           # delete one or more nodes
 python figmosha.py icomp <component-key>         # import library component, place + zoom
 python figmosha.py status                        # bridge + plugin connection state
 ```
@@ -177,12 +182,17 @@ new Function("figma", "print", "h", `return (async () => { <YOUR CODE> })();`)(f
 | `await h.bN(node, prop, varOrId)` | Bind numeric prop (radius, padding, size, itemSpacing, …) |
 | `h.findByName(root, name)` | First descendant with exact name |
 | `h.findAllByName(root, name)` | All descendants with exact name |
-| `h.dumpTree(node, {maxDepth, showSize, showText})` | Indented tree string |
+| `h.dumpTree(node, {maxDepth, showSize, showText, showLayout})` | Indented tree string |
 | `await h.withFonts(root, asyncFn)` | Auto-loads every unique font in the subtree, then runs your callback |
 | `await h.setText(node, text)` | Sets `node.characters` with auto font load (single-font nodes only) |
 | `h.cloneNext(node, {direction, gap, name})` | Clone + place adjacent (`right`/`left`/`up`/`down`) |
 | `await h.variant(instance, props)` | Wrapper around `instance.setProperties(...)` |
 | `await h.variantsOf(instance)` | `{current, groups, all}` of the component set |
+| `h.sel()` | Currently selected nodes as `{id,name,type,w,h}` |
+| `h.resolve(idOrAlias)` | Node by id, or the aliases `page` / `sel` |
+| `h.hex("#1a2b3c")` | Hex to Figma's 0..1 `{r,g,b}` |
+| `h.solid("#1a2b3c", opacity?)` | Ready-to-assign paint array |
+| `h.frame(parent, opts)` | Frame with auto-layout applied in the right order |
 | `await h.node(id)` | Shorthand for `figma.getNodeByIdAsync(id)` |
 | `await h.var_(idOrKey)` | Resolve variable from instance, local id, or library key |
 | `await h.importComp(key)` | `figma.importComponentByKeyAsync(key)` |
@@ -254,3 +264,13 @@ To add an error hint:
 ## License
 
 MIT
+
+## Tests
+
+No Figma needed — a fake plugin drives the bridge over a real WebSocket:
+
+```bash
+pip install pytest aiohttp
+pytest -q            # bridge: guard, exec round trip, timeouts, slot handover
+node tests/helpers.test.js   # pure helpers: hex maths, auto-layout ordering
+```

@@ -49,6 +49,35 @@ async function resolveVar(varOrId) {
   }
 }
 
+// "#1a2b3c" / "1a2b3c" / "#f00" -> {r,g,b} in Figma's 0..1 range.
+function hexToRgb(value) {
+  let s = String(value).trim().replace(/^#/, "");
+  if (s.length === 3) s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
+  if (!/^[0-9a-fA-F]{6}$/.test(s)) {
+    throw new Error("h.hex: expected #RGB or #RRGGBB, got " + JSON.stringify(value));
+  }
+  const n = parseInt(s, 16);
+  return {
+    r: ((n >> 16) & 255) / 255,
+    g: ((n >> 8) & 255) / 255,
+    b: (n & 255) / 255,
+  };
+}
+
+// Normalise padding given as a number, [v, h], or {top,right,bottom,left}.
+function paddingOf(p) {
+  if (p == null) return null;
+  if (typeof p === "number") return { top: p, right: p, bottom: p, left: p };
+  if (Array.isArray(p)) {
+    const v = p[0], hz = p.length > 1 ? p[1] : p[0];
+    return { top: v, right: hz, bottom: v, left: hz };
+  }
+  return {
+    top: p.top || 0, right: p.right || 0,
+    bottom: p.bottom || 0, left: p.left || 0,
+  };
+}
+
 // Copy a paint array before mutating it — node.fills/strokes are frozen.
 function copyPaints(node, prop, who) {
   const paints = node[prop];
@@ -111,6 +140,7 @@ const HELPERS = {
     const maxDepth = opts.maxDepth == null ? 99 : opts.maxDepth;
     const showSize = opts.showSize !== false;
     const showText = opts.showText !== false;
+    const showLayout = opts.showLayout === true;
     const lines = [];
     const walk = (n, d) => {
       if (d > maxDepth) return;
@@ -118,6 +148,12 @@ const HELPERS = {
       let line = pad + n.name + " [" + n.type + "] " + n.id;
       if (showSize && n.width !== undefined) {
         line += " " + Math.round(n.width) + "×" + Math.round(n.height);
+      }
+      if (showLayout && n.layoutMode && n.layoutMode !== "NONE") {
+        line += " {" + n.layoutMode[0] +
+          " gap:" + n.itemSpacing +
+          " pad:" + n.paddingTop + "," + n.paddingRight + "," + n.paddingBottom + "," + n.paddingLeft +
+          " " + n.primaryAxisSizingMode + "/" + n.counterAxisSizingMode + "}";
       }
       if (showText && n.type === "TEXT") line += ' "' + n.characters + '"';
       lines.push(line);
@@ -192,6 +228,83 @@ const HELPERS = {
     return set
       ? { current: main.name, groups: set.variantGroupProperties, all: set.children.map(c => c.name) }
       : { current: main.name, groups: null, all: null };
+  },
+
+  // What the user has selected right now — the bridge between "this one here"
+  // and a node id you can act on.
+  sel() {
+    return figma.currentPage.selection.map((n) => ({
+      id: n.id, name: n.name, type: n.type,
+      w: n.width, h: n.height,
+      chars: n.type === "TEXT" ? n.characters : undefined,
+    }));
+  },
+
+  // Hex string -> {r,g,b}. Hand-rolling this is where the missing /255 lives.
+  hex(value) { return hexToRgb(value); },
+
+  // Ready-to-assign paint array: node.fills = h.solid("#1a2b3c")
+  solid(value, opacity) {
+    const paint = { type: "SOLID", color: hexToRgb(value) };
+    if (opacity != null) paint.opacity = opacity;
+    return [paint];
+  },
+
+  // Create a frame with auto-layout applied in the order Figma demands:
+  // into the tree -> layoutMode -> size -> sizing mode -> spacing/padding.
+  // Getting that order wrong silently drops the settings.
+  frame(parent, opts) {
+    opts = opts || {};
+    const f = figma.createFrame();
+    if (parent) parent.appendChild(f);
+
+    if (opts.name) f.name = opts.name;
+
+    if (opts.layout) {
+      const l = String(opts.layout).toUpperCase();
+      f.layoutMode = l === "V" ? "VERTICAL" : l === "H" ? "HORIZONTAL" : l;
+    }
+
+    if (opts.w != null || opts.h != null) {
+      f.resize(opts.w == null ? f.width : opts.w, opts.h == null ? f.height : opts.h);
+    }
+
+    if (f.layoutMode && f.layoutMode !== "NONE") {
+      // Hug by default on axes the caller didn't pin to a number.
+      if (opts.hug !== false) {
+        const horizontalIsPrimary = f.layoutMode === "HORIZONTAL";
+        const primaryFixed = horizontalIsPrimary ? opts.w != null : opts.h != null;
+        const counterFixed = horizontalIsPrimary ? opts.h != null : opts.w != null;
+        if (!primaryFixed) f.primaryAxisSizingMode = "AUTO";
+        if (!counterFixed) f.counterAxisSizingMode = "AUTO";
+      }
+      if (opts.spacing != null) f.itemSpacing = opts.spacing;
+      if (opts.align) {
+        if (opts.align.primary) f.primaryAxisAlignItems = opts.align.primary;
+        if (opts.align.counter) f.counterAxisAlignItems = opts.align.counter;
+      }
+      const pad = paddingOf(opts.padding);
+      if (pad) {
+        f.paddingTop = pad.top; f.paddingRight = pad.right;
+        f.paddingBottom = pad.bottom; f.paddingLeft = pad.left;
+      }
+    }
+
+    if (opts.fill != null) f.fills = opts.fill === false ? [] : HELPERS.solid(opts.fill);
+    if (opts.radius != null) f.cornerRadius = opts.radius;
+    return f;
+  },
+
+  // Accept "page" / "sel" alongside a real node id, so callers can say
+  // "the thing I'm looking at" without first hunting for its id.
+  async resolve(idOrAlias) {
+    if (idOrAlias === "page") return figma.currentPage;
+    if (idOrAlias === "sel") {
+      const s = figma.currentPage.selection;
+      if (!s.length) throw new Error("nothing selected in Figma");
+      return s[0];
+    }
+    return await figma.getNodeByIdAsync(idOrAlias);
   },
 
   // Quick async accessors
