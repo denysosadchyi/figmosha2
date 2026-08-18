@@ -113,14 +113,19 @@ The plugin runtime exposes a small helper namespace. Use these to keep scripts s
 | `h.ck()` | Throws if the bridge abandoned this run — call it each loop iteration in a sweep |
 | `h.findByName(root, name)` | First descendant by exact name |
 | `h.findAllByName(root, name)` | All descendants by exact name |
-| `h.dumpTree(node, {maxDepth, showSize, showText})` | Indented tree string |
+| `h.dumpTree(node, {maxDepth, showSize, showText, showLayout})` | Indented tree string |
 | `await h.withFonts(root, asyncFn)` | Loads every unique font in subtree, then runs `asyncFn` |
 | `await h.setText(node, text)` | Set TEXT node chars with auto font load |
 | `h.cloneNext(node, {direction, gap, name})` | Clone + place adjacent (`right`/`left`/`up`/`down`) |
 | `await h.variant(instance, props)` | Wrapper around `instance.setProperties(...)` |
 | `await h.variantsOf(instance)` | `{ current, groups, all }` for the component set |
+| `h.sel()` | Currently selected nodes as `{id,name,type,w,h}` |
+| `h.resolve(idOrAlias)` | Node by id, or the aliases `page` / `sel` |
+| `h.hex("#1a2b3c")` | Hex to Figma's 0..1 `{r,g,b}` |
+| `h.solid("#1a2b3c", opacity?)` | Ready-to-assign paint array |
+| `h.frame(parent, opts)` | Frame with auto-layout applied in the right order |
 | `await h.node(id)` | Shorthand for `figma.getNodeByIdAsync(id)` |
-| `await h.var_(idOrKey)` | Resolve a variable from id or instance |
+| `await h.var_(idOrKey)` | Resolve a variable from instance, local id, or library key |
 | `await h.importComp(key)` | `figma.importComponentByKeyAsync(key)` |
 | `await h.importVar(key)` | `figma.variables.importVariableByKeyAsync(key)` |
 
@@ -163,6 +168,8 @@ await h.withFonts(root, async () => {
 
 | Command | Equivalent JS | Use case |
 |---|---|---|
+| `figmosha doctor` | — | Diagnose bridge → plugin → Figma, with the fix for each break |
+| `figmosha sel` | `h.sel()` | What the user has selected right now |
 | `figmosha tree <id>` | `h.dumpTree(await h.node(id))` | Explore node structure |
 | `figmosha find <id> name=Button` | `(await h.node(id)).findAll(n => n.name === "Button")` | Locate by name |
 | `figmosha find <id> name~Btn` | `findAll(n => n.name.includes("Btn"))` | Substring name match |
@@ -171,10 +178,16 @@ await h.withFonts(root, async () => {
 | `figmosha text <id> "новий"` | `await h.setText(n, "новий")` | Edit text safely |
 | `figmosha variant <id> "Property 1=Default"` | `await n.setProperties({...})` | Switch variant |
 | `figmosha clone <id> --right --gap 100` | `h.cloneNext(n, {direction:'right',gap:100})` | Duplicate adjacent |
-| `figmosha rm <id>` | `n.remove()` | Delete |
+| `figmosha rm <id> [<id>…]` | `n.remove()` | Delete one or more |
 | `figmosha icomp <key>` | `(await h.importComp(key)).createInstance()` | Pull from library |
 
+Anywhere an id is taken, `page` and `sel` work too — `figmosha tree sel --layout`
+dumps the selected subtree without hunting for its id first.
+
 Use subcommands when the op fits one of these. Fall back to `exec` for anything else.
+
+When the user says "this frame" or "the selected one", call `figmosha sel` — don't
+ask them to find an id by hand.
 
 ## How exec evaluates code
 
@@ -214,6 +227,15 @@ f.resize(400, 100)               // 3. size
 f.primaryAxisSizingMode = "AUTO" // 4. sizing
 f.itemSpacing = 16               // 5. spacing/padding
 f.paddingTop = 24
+```
+
+`h.frame` does all of that in the right order — prefer it:
+
+```js
+const f = h.frame(parent, {
+  layout: "V", spacing: 16, padding: [24, 16],
+  fill: "#ffffff", radius: 8, name: "Card",
+})
 ```
 
 ### Two-stage workflow for big builds

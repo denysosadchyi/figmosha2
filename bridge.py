@@ -29,6 +29,11 @@ PLUGINS: dict = {}        # conn_id -> {"ws", "fileKey", "name"}
 LOCKS: dict = {}          # conn_id -> asyncio.Lock — one exec at a time per file
 ABANDONED: dict = {}      # rid -> {"conn", "t0", "timeout"} — timed out, may still be running
 
+# Host: values accepted in the Host header. Populated in main() from the bind
+# address. Empty set means "don't check" — chosen when the user binds a
+# non-loopback address on purpose (--host 0.0.0.0).
+ALLOWED_HOSTS: set = set()
+
 
 def _lock_for(conn_id):
     """One lock per connected file.
@@ -42,6 +47,43 @@ def _lock_for(conn_id):
     if lock is None:
         lock = LOCKS[conn_id] = asyncio.Lock()
     return lock
+
+
+def _guard(request: web.Request, *, allow_null_origin: bool = False):
+    """Reject browser-driven requests. Returns an error Response, or None if OK.
+
+    The bridge executes arbitrary JS inside the user's Figma file, so any web
+    page the user happens to have open is part of the threat model — binding to
+    127.0.0.1 only keeps other machines out, not other tabs.
+
+    Two checks:
+      * Origin — local clients (curl, the figmosha CLI) never send this header.
+        A browser always does on cross-origin requests, so its mere presence
+        means the request came from a page. This blocks CSRF, including the
+        "simple request" trick of posting JSON as text/plain to dodge preflight.
+      * Host — a page whose DNS is re-pointed at 127.0.0.1 (DNS rebinding)
+        becomes same-origin with the bridge and could then read responses.
+        Pinning Host to the loopback names we actually serve closes that.
+    """
+    if ALLOWED_HOSTS:
+        host = (request.headers.get("Host") or "").lower()
+        if host not in ALLOWED_HOSTS:
+            return web.json_response(
+                {"ok": False, "error": f"unexpected Host header: {host!r}"}, status=403,
+            )
+
+    origin = request.headers.get("Origin")
+    if origin is not None:
+        # The Figma plugin UI runs in a sandboxed iframe, which reports "null".
+        if not (allow_null_origin and origin == "null"):
+            return web.json_response(
+                {"ok": False,
+                 "error": "cross-origin requests are not allowed",
+                 "hint": "the bridge only accepts local clients (curl, figmosha CLI) "
+                         "and the Figma plugin"},
+                status=403,
+            )
+    return None
 
 
 ERROR_HINTS = [
@@ -89,12 +131,21 @@ def _label(conn_id: str) -> str:
     return info.get("name") or f"({conn_id[:8]})"
 
 
-async def plugin_ws_handler(request: web.Request) -> web.WebSocketResponse:
+async def plugin_ws_handler(request: web.Request):
+    # CSRF/rebinding guard (upstream): the plugin UI iframe reports Origin "null".
+    blocked = _guard(request, allow_null_origin=True)
+    if blocked is not None:
+        print(f"[plugin] refused connection from {request.remote} "
+              f"(origin={request.headers.get('Origin')!r})")
+        return blocked
+
     ws = web.WebSocketResponse(heartbeat=20, max_msg_size=16 * 1024 * 1024)
     await ws.prepare(request)
 
     # Each plugin (one per open Figma file) gets its own registry slot. Identity
     # (fileKey / file name) arrives in the `hello` message a moment after connect.
+    # Reconnects never lock out: a stale same-file connection is replaced at
+    # `hello` time, so no incumbent check is needed in the multi-file model.
     conn_id = str(uuid.uuid4())
     PLUGINS[conn_id] = {"ws": ws, "fileKey": None, "name": None}
     print(f"[plugin] connected {conn_id[:8]} from {request.remote}")
@@ -139,6 +190,7 @@ async def plugin_ws_handler(request: web.Request) -> web.WebSocketResponse:
                       f"file={name!r} key={file_key}")
                 continue
             if mtype == "pong":
+                # Keepalive reply from newer plugin builds — nothing to do.
                 continue
 
             rid = m.get("id")
@@ -226,6 +278,10 @@ def resolve_target(target):
 
 
 async def exec_handler(request: web.Request) -> web.Response:
+    blocked = _guard(request)
+    if blocked is not None:
+        return blocked
+
     try:
         body = await request.json()
     except json.JSONDecodeError:
@@ -359,7 +415,11 @@ def _files_payload():
     ]
 
 
-async def status_handler(_request: web.Request) -> web.Response:
+async def status_handler(request: web.Request) -> web.Response:
+    blocked = _guard(request)
+    if blocked is not None:
+        return blocked
+
     files = _files_payload()
     return web.json_response({
         "plugin_connected": len(files) > 0,
@@ -374,6 +434,10 @@ async def status_handler(_request: web.Request) -> web.Response:
 
 async def clear_handler(request: web.Request) -> web.Response:
     """Drop the abandoned-script interlock for one file, after a 504."""
+    blocked = _guard(request)
+    if blocked is not None:
+        return blocked
+
     try:
         body = await request.json()
     except json.JSONDecodeError:
@@ -392,11 +456,19 @@ async def clear_handler(request: web.Request) -> web.Response:
                               "file": info.get("name")})
 
 
-async def targets_handler(_request: web.Request) -> web.Response:
+async def targets_handler(request: web.Request) -> web.Response:
+    blocked = _guard(request)
+    if blocked is not None:
+        return blocked
+
     return web.json_response({"files": _files_payload()})
 
 
-async def root_handler(_request: web.Request) -> web.Response:
+async def root_handler(request: web.Request) -> web.Response:
+    blocked = _guard(request)
+    if blocked is not None:
+        return blocked
+
     return web.json_response({
         "service": "figmosha-bridge",
         "version": "2.0",
@@ -424,10 +496,24 @@ def build_app() -> web.Application:
 
 
 def main():
+    global ALLOWED_HOSTS
+
     ap = argparse.ArgumentParser(description="Figmosha 2.0 bridge server")
     ap.add_argument("--host", default="127.0.0.1", help="bind host (default 127.0.0.1)")
     ap.add_argument("--port", type=int, default=8787, help="bind port (default 8787)")
     args = ap.parse_args()
+
+    if args.host in ("127.0.0.1", "localhost", "::1"):
+        ALLOWED_HOSTS = {
+            f"localhost:{args.port}",
+            f"127.0.0.1:{args.port}",
+            f"[::1]:{args.port}",
+        }
+    else:
+        # Binding beyond loopback is a deliberate choice, and the reachable
+        # hostnames are unknowable from here — skip the Host check and say so.
+        print(f"[bridge] WARNING: bound to {args.host} — Host check disabled, "
+              f"anyone who can reach this port can run code in your Figma file")
 
     print(f"[bridge] listening on http://{args.host}:{args.port}")
     print(f"[bridge] plugin should connect to ws://localhost:{args.port}/plugin")

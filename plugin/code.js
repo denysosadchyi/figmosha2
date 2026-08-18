@@ -1,4 +1,4 @@
-figma.showUI(__html__, { width: 360, height: 260, title: "Figmosha Bridge" });
+figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
@@ -27,12 +27,79 @@ function asText(value, logs) {
 
 // ─── helpers exposed as `h.*` to every exec ──────────────────────────────
 
+// Set for the duration of one exec so helpers can surface warnings through the
+// same `print()` the user's code gets. No-op outside an exec.
+let CURRENT_PRINT = () => {};
+
 async function resolveVar(varOrId) {
   if (varOrId == null) return null;
-  if (typeof varOrId === "string") {
+  if (typeof varOrId !== "string") return varOrId;
+
+  // Local variables are addressed as "VariableID:1:23"; anything else is a
+  // library key, which has to be imported rather than looked up.
+  if (varOrId.indexOf("VariableID:") === 0) {
     return await figma.variables.getVariableByIdAsync(varOrId);
   }
-  return varOrId;
+  // A library key is not a well-formed id, and getVariableByIdAsync rejects
+  // those by throwing rather than returning null — so this has to be guarded,
+  // otherwise the import below is unreachable for the very case it exists for.
+  let local = null;
+  try {
+    local = await figma.variables.getVariableByIdAsync(varOrId);
+  } catch (e) {
+    local = null;
+  }
+  if (local) return local;
+
+  try {
+    return await figma.variables.importVariableByKeyAsync(varOrId);
+  } catch (e) {
+    return null;
+  }
+}
+
+// "#1a2b3c" / "1a2b3c" / "#f00" -> {r,g,b} in Figma's 0..1 range.
+function hexToRgb(value) {
+  let s = String(value).trim().replace(/^#/, "");
+  if (s.length === 3) s = s[0] + s[0] + s[1] + s[1] + s[2] + s[2];
+  if (!/^[0-9a-fA-F]{6}$/.test(s)) {
+    throw new Error("h.hex: expected #RGB or #RRGGBB, got " + JSON.stringify(value));
+  }
+  const n = parseInt(s, 16);
+  return {
+    r: ((n >> 16) & 255) / 255,
+    g: ((n >> 8) & 255) / 255,
+    b: (n & 255) / 255,
+  };
+}
+
+// Normalise padding given as a number, [v, h], or {top,right,bottom,left}.
+function paddingOf(p) {
+  if (p == null) return null;
+  if (typeof p === "number") return { top: p, right: p, bottom: p, left: p };
+  if (Array.isArray(p)) {
+    const v = p[0], hz = p.length > 1 ? p[1] : p[0];
+    return { top: v, right: hz, bottom: v, left: hz };
+  }
+  return {
+    top: p.top || 0, right: p.right || 0,
+    bottom: p.bottom || 0, left: p.left || 0,
+  };
+}
+
+// Copy a paint array before mutating it — node.fills/strokes are frozen.
+function copyPaints(node, prop, who) {
+  const paints = node[prop];
+  if (typeof paints === "symbol") {
+    throw new Error(
+      who + ": '" + node.name + "' has mixed " + prop +
+      "; set the paint per-range, or unify " + prop + " on the node first"
+    );
+  }
+  if (!Array.isArray(paints)) {
+    throw new Error(who + ": '" + node.name + "' has no " + prop);
+  }
+  return JSON.parse(JSON.stringify(paints));
 }
 
 const HELPERS = {
@@ -40,7 +107,8 @@ const HELPERS = {
   async bF(node, idx, varOrId) {
     const v = await resolveVar(varOrId);
     if (!v) throw new Error("h.bF: variable not found: " + varOrId);
-    const f = JSON.parse(JSON.stringify(node.fills));
+    const f = copyPaints(node, "fills", "h.bF");
+    if (!f[idx]) throw new Error("h.bF: '" + node.name + "' has no fill at index " + idx);
     f[idx] = figma.variables.setBoundVariableForPaint(f[idx], "color", v);
     node.fills = f;
     return v;
@@ -50,7 +118,8 @@ const HELPERS = {
   async bS(node, idx, varOrId) {
     const v = await resolveVar(varOrId);
     if (!v) throw new Error("h.bS: variable not found: " + varOrId);
-    const s = JSON.parse(JSON.stringify(node.strokes));
+    const s = copyPaints(node, "strokes", "h.bS");
+    if (!s[idx]) throw new Error("h.bS: '" + node.name + "' has no stroke at index " + idx);
     s[idx] = figma.variables.setBoundVariableForPaint(s[idx], "color", v);
     node.strokes = s;
     return v;
@@ -80,6 +149,7 @@ const HELPERS = {
     const maxDepth = opts.maxDepth == null ? 99 : opts.maxDepth;
     const showSize = opts.showSize !== false;
     const showText = opts.showText !== false;
+    const showLayout = opts.showLayout === true;
     const lines = [];
     const walk = (n, d) => {
       if (d > maxDepth) return;
@@ -87,6 +157,12 @@ const HELPERS = {
       let line = pad + n.name + " [" + n.type + "] " + n.id;
       if (showSize && n.width !== undefined) {
         line += " " + Math.round(n.width) + "×" + Math.round(n.height);
+      }
+      if (showLayout && n.layoutMode && n.layoutMode !== "NONE") {
+        line += " {" + n.layoutMode[0] +
+          " gap:" + n.itemSpacing +
+          " pad:" + n.paddingTop + "," + n.paddingRight + "," + n.paddingBottom + "," + n.paddingLeft +
+          " " + n.primaryAxisSizingMode + "/" + n.counterAxisSizingMode + "}";
       }
       if (showText && n.type === "TEXT") line += ' "' + n.characters + '"';
       lines.push(line);
@@ -103,11 +179,21 @@ const HELPERS = {
       : (rootNode.type === "TEXT" ? [rootNode] : []);
     const seen = new Set();
     const fonts = [];
+    const skipped = [];
     for (const t of texts) {
-      if (typeof t.fontName === "symbol") continue;
+      // Mixed-font nodes can't be loaded wholesale; editing one later throws a
+      // confusing "font not loaded" far from here, so say it out loud now.
+      if (typeof t.fontName === "symbol") { skipped.push(t.name); continue; }
       const fn = t.fontName;
       const key = fn.family + "|" + fn.style;
       if (!seen.has(key)) { seen.add(key); fonts.push(fn); }
+    }
+    if (skipped.length) {
+      CURRENT_PRINT(
+        "h.withFonts: skipped " + skipped.length + " mixed-font text node(s): " +
+        skipped.slice(0, 5).join(", ") + (skipped.length > 5 ? ", …" : "") +
+        " — editing them will fail unless you load each range manually"
+      );
     }
     await Promise.all(fonts.map((f) => figma.loadFontAsync(f)));
     return await asyncFn();
@@ -153,6 +239,83 @@ const HELPERS = {
       : { current: main.name, groups: null, all: null };
   },
 
+  // What the user has selected right now — the bridge between "this one here"
+  // and a node id you can act on.
+  sel() {
+    return figma.currentPage.selection.map((n) => ({
+      id: n.id, name: n.name, type: n.type,
+      w: n.width, h: n.height,
+      chars: n.type === "TEXT" ? n.characters : undefined,
+    }));
+  },
+
+  // Hex string -> {r,g,b}. Hand-rolling this is where the missing /255 lives.
+  hex(value) { return hexToRgb(value); },
+
+  // Ready-to-assign paint array: node.fills = h.solid("#1a2b3c")
+  solid(value, opacity) {
+    const paint = { type: "SOLID", color: hexToRgb(value) };
+    if (opacity != null) paint.opacity = opacity;
+    return [paint];
+  },
+
+  // Create a frame with auto-layout applied in the order Figma demands:
+  // into the tree -> layoutMode -> size -> sizing mode -> spacing/padding.
+  // Getting that order wrong silently drops the settings.
+  frame(parent, opts) {
+    opts = opts || {};
+    const f = figma.createFrame();
+    if (parent) parent.appendChild(f);
+
+    if (opts.name) f.name = opts.name;
+
+    if (opts.layout) {
+      const l = String(opts.layout).toUpperCase();
+      f.layoutMode = l === "V" ? "VERTICAL" : l === "H" ? "HORIZONTAL" : l;
+    }
+
+    if (opts.w != null || opts.h != null) {
+      f.resize(opts.w == null ? f.width : opts.w, opts.h == null ? f.height : opts.h);
+    }
+
+    if (f.layoutMode && f.layoutMode !== "NONE") {
+      // Hug by default on axes the caller didn't pin to a number.
+      if (opts.hug !== false) {
+        const horizontalIsPrimary = f.layoutMode === "HORIZONTAL";
+        const primaryFixed = horizontalIsPrimary ? opts.w != null : opts.h != null;
+        const counterFixed = horizontalIsPrimary ? opts.h != null : opts.w != null;
+        if (!primaryFixed) f.primaryAxisSizingMode = "AUTO";
+        if (!counterFixed) f.counterAxisSizingMode = "AUTO";
+      }
+      if (opts.spacing != null) f.itemSpacing = opts.spacing;
+      if (opts.align) {
+        if (opts.align.primary) f.primaryAxisAlignItems = opts.align.primary;
+        if (opts.align.counter) f.counterAxisAlignItems = opts.align.counter;
+      }
+      const pad = paddingOf(opts.padding);
+      if (pad) {
+        f.paddingTop = pad.top; f.paddingRight = pad.right;
+        f.paddingBottom = pad.bottom; f.paddingLeft = pad.left;
+      }
+    }
+
+    if (opts.fill != null) f.fills = opts.fill === false ? [] : HELPERS.solid(opts.fill);
+    if (opts.radius != null) f.cornerRadius = opts.radius;
+    return f;
+  },
+
+  // Accept "page" / "sel" alongside a real node id, so callers can say
+  // "the thing I'm looking at" without first hunting for its id.
+  async resolve(idOrAlias) {
+    if (idOrAlias === "page") return figma.currentPage;
+    if (idOrAlias === "sel") {
+      const s = figma.currentPage.selection;
+      if (!s.length) throw new Error("nothing selected in Figma");
+      return s[0];
+    }
+    return await figma.getNodeByIdAsync(idOrAlias);
+  },
+
   // Quick async accessors
   async node(id)      { return await figma.getNodeByIdAsync(id); },
   async var_(idOrKey) { return await resolveVar(idOrKey); },
@@ -193,6 +356,7 @@ figma.ui.onmessage = async (msg) => {
   };
   h.aborted = () => ABORTED.has(id);
 
+  CURRENT_PRINT = print;
   try {
     const fn = new Function(
       "figma", "print", "h",
@@ -215,5 +379,7 @@ figma.ui.onmessage = async (msg) => {
       text: (e && e.message) || String(e),
       stack: (e && e.stack) || null,
     });
+  } finally {
+    CURRENT_PRINT = () => {};
   }
 };
