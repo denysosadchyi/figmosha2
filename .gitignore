@@ -14,3 +14,6 @@ __pycache__/
 
 # Local MCP config
 .mcp.json
+
+# Machine-specific instructions
+CLAUDE.local.md
