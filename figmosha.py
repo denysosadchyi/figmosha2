@@ -63,7 +63,11 @@ def _request(method, path, payload=None, timeout=65):
 
 
 def _exec(code, timeout=60):
-    return _request("POST", "/exec", {"code": code, "timeout": timeout})
+    # The socket deadline has to outlast the server-side one, otherwise a long
+    # --timeout dies here at the default 65s while the bridge is still waiting,
+    # and we lose the bridge's own error payload (including any hint).
+    return _request("POST", "/exec", {"code": code, "timeout": timeout},
+                    timeout=timeout + 5)
 
 
 def _emit(resp, raw=False):
@@ -130,7 +134,13 @@ def cmd_find(args):
         print("  forms: name=X (exact), name~X (substring), type=X, text=X (substring)", file=sys.stderr)
         return 2
 
-    if "~" in args.filter and args.filter.index("~") < args.filter.index("=") if "=" in args.filter else True:
+    # Whichever separator comes first decides the mode, so a value may contain
+    # the other character (name~a=b is a substring search for "a=b").
+    tilde = args.filter.find("~")
+    equals = args.filter.find("=")
+    substring_mode = tilde != -1 and (equals == -1 or tilde < equals)
+
+    if substring_mode:
         key, value = args.filter.split("~", 1)
         if key == "name":
             predicate = f"n.name.includes({json.dumps(value)})"

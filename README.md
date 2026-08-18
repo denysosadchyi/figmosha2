@@ -209,7 +209,7 @@ new Function("figma", "print", "h", `return (async () => { <YOUR CODE> })();`)(f
 | `await h.variant(instance, props)` | Wrapper around `instance.setProperties(...)` |
 | `await h.variantsOf(instance)` | `{current, groups, all}` of the component set |
 | `await h.node(id)` | Shorthand for `figma.getNodeByIdAsync(id)` |
-| `await h.var_(idOrKey)` | Resolve variable from id or instance |
+| `await h.var_(idOrKey)` | Resolve variable from instance, local id, or library key |
 | `await h.importComp(key)` | `figma.importComponentByKeyAsync(key)` |
 | `await h.importVar(key)` | `figma.variables.importVariableByKeyAsync(key)` |
 
@@ -258,7 +258,7 @@ start-bridge.sh        tmux-based bridge management
 plugin/
   manifest.json        Permissions + allowed origins
   code.js              Plugin sandbox: exec + helpers
-  ui.html              WS client + auto-reconnect + log panel
+  ui.html              WS client + auto-reconnect + status bar
 CLAUDE.md              Conventions for Claude Code sessions driving Figmosha
 README.md              This file
 ```

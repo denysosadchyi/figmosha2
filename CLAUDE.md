@@ -47,7 +47,7 @@ The plugin runtime exposes a small helper namespace. Use these to keep scripts s
 | `await h.variant(instance, props)` | Wrapper around `instance.setProperties(...)` |
 | `await h.variantsOf(instance)` | `{ current, groups, all }` for the component set |
 | `await h.node(id)` | Shorthand for `figma.getNodeByIdAsync(id)` |
-| `await h.var_(idOrKey)` | Resolve a variable from id or instance |
+| `await h.var_(idOrKey)` | Resolve a variable from instance, local id, or library key |
 | `await h.importComp(key)` | `figma.importComponentByKeyAsync(key)` |
 | `await h.importVar(key)` | `figma.variables.importVariableByKeyAsync(key)` |
 
