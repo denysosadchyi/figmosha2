@@ -13,7 +13,7 @@ The Figma Plugin API is the most stable and powerful interface Figma offers. Tho
 Figmosha 2.0 keeps a plugin permanently open in Figma and exposes its Plugin API through a local network socket. You write code in your editor / Claude / a script, it runs inside Figma, and the result comes back to you.
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph client["PowerShell · curl · Claude Code"]
         CLI["figmosha.py<br/>or any HTTP client"]
     end
