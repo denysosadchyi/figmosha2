@@ -22,8 +22,80 @@ curl -s -X POST http://localhost:8787/exec \
   -d '{"code":"return figma.currentPage.id"}'
 
 # Status
-curl -s http://localhost:8787/status   # {"plugin_connected": true/false, "pending": 0}
+curl -s http://localhost:8787/status   # {"plugin_connected": ..., "files": [...], "pending": 0, "abandoned": []}
 ```
+
+## Multiple files: targets (`-T`) — READ THIS FIRST
+
+The bridge holds **one connection per open Figma file** that is running the plugin, not one globally.
+
+```bash
+python figmosha.py targets                      # list connected files: name / fileKey / conn
+curl -s http://localhost:8787/targets
+
+# -T is a per-subcommand flag — it goes AFTER the subcommand, never before it
+python figmosha.py exec "return figma.root.name" -T "Design System"
+python figmosha.py tree 286:110 -T "Design System"
+curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Color"}'
+```
+
+`target` matching (`resolve_target` in `bridge.py`): exact file name (case-insensitive) → exact
+`fileKey` → unambiguous substring of the name.
+
+- The name is `figma.root.name` as the plugin reports it — **verify with `targets`, don't assume**
+  (the colors file reports as `Color`, singular, not `Colors`).
+- **`fileKey` targeting does not work in this setup** — the plugin reports `fileKey: null` (shown as `-`
+  in `targets`), so the file keys in the project registry are for `importComponentByKeyAsync`, not for
+  `-T`. Match by name only.
+
+- **No target + exactly 1 file connected** → routed there (the old default).
+- **No target + 2 or more connected** → **HTTP 409** `"N files connected — specify a target"`.
+  This is the #1 wasted call. **Always pass `-T`** with the file name from the project profile.
+- Ambiguous substring → 409 listing the candidates. Nothing connected → 503.
+
+### Concurrency
+
+**The bridge serializes execs per file** (added 2026-08-10). Requests are multiplexed by request id,
+and `/exec` takes a per-connection `asyncio.Lock` before sending — so two callers on the same file
+(orchestrator + agent, or two agents) run **one after another, never interleaved**. Concurrent callers
+on *different* files are unaffected.
+
+Why the lock is needed: each file's plugin sandbox is a single-threaded async message handler over one
+shared document and one shared undo stack. Without it, two scripts yield to each other at **every
+`await`**, invalidating each other's `findAll` snapshots mid-run.
+
+- **Writes: just fire them.** The lock makes concurrent writers safe. **One exec = one transaction** —
+  a read-modify-write split across two calls still lets the other writer land in the gap.
+- **Reads: pass `--parallel`** (`{"parallel": true}`) to bypass the lock and fan out. **Read-only
+  scripts only** — a parallel writer interleaves exactly as before.
+- Keep each exec ~10s and chunk sweeps (≤25 nodes). A long script now genuinely blocks that file, so
+  other callers wait on the lock and can hit their own timeout.
+
+**A 504 does not mean the write didn't happen.** Nothing can kill a script already running in the
+sandbox, so on timeout the bridge marks it **abandoned** and returns 504 with a `warning` and the `rid`.
+While a file has an abandoned script, further execs on it return **409** rather than racing an invisible
+writer. The interlock lifts by itself when the orphan finally replies (logged `[orphan]`), or manually:
+
+```bash
+python figmosha.py clear -T "Design System"       # drop the interlock
+curl -s -X POST http://localhost:8787/clear -d '{"target":"Design System"}'
+```
+
+`{"force": true}` pushes past the interlock if you know the orphan is harmless. `GET /status` reports
+`pending` (in-flight) and `abandoned` (`[{rid, conn, age_s}]`).
+
+- **Cooperative cancellation:** chunked sweeps should call **`h.ck()`** each iteration — it throws once
+  the bridge has given up on that run, so the loop stops instead of mutating under the next caller.
+  (Requires the plugin re-Run after 2026-08-10; harmless on older builds, which ignore `abort`.)
+- **Duplicate file names are refused, not guessed.** Two connected windows reporting the same
+  `figma.root.name` → 409 listing both conns. Close one.
+
+Agent-level rules (who may write, read-only auditors, and the operations that still demand a single
+owner by policy — `/purge-components`) live in `~/.claude/CLAUDE.md` §Agents & pipelines. Note the lock
+makes concurrent writers **corruption-safe, not conflict-safe**: it orders writes, it cannot tell that
+two agents meant to change the same node. Overlapping writers = last write wins, silently. Partition by
+**ownership of mains / variants / variables — not by frame or screen**: a main-component or variable edit
+propagates file-wide, into frames the other writer has already verified.
 
 If the bridge isn't running: `bash start-bridge.sh` (runs in tmux `figmosha-bridge`; logs at `/tmp/figmosha-bridge.log`).
 
@@ -38,6 +110,7 @@ The plugin runtime exposes a small helper namespace. Use these to keep scripts s
 | `await h.bF(node, idx, varOrId)` | Bind fill paint to variable (id or instance) |
 | `await h.bS(node, idx, varOrId)` | Bind stroke paint to variable |
 | `await h.bN(node, prop, varOrId)` | Bind numeric prop (radius, padding, size...) |
+| `h.ck()` | Throws if the bridge abandoned this run — call it each loop iteration in a sweep |
 | `h.findByName(root, name)` | First descendant by exact name |
 | `h.findAllByName(root, name)` | All descendants by exact name |
 | `h.dumpTree(node, {maxDepth, showSize, showText})` | Indented tree string |
@@ -164,31 +237,35 @@ return root.findAll(n => n.type === "TEXT").map(t => t.characters)
 
 - **`plugin not connected` (503)**: plugin window closed in Figma. Ask user to Run it again.
 - **Timeout (504)**: probably infinite loop or unresolved `await`. Ask user to close & re-run plugin.
-- **`teamlibrary permission not specified`** (or similar): manifest needs a new permission. Edit `plugin/manifest.json`, sync to user's Windows copy (`/mnt/c/Users/User/figmosha-plugin/manifest.json` on their WSL), ask user to **re-import** the plugin (Plugins → Development → Manage plugins → remove + Import again).
+- **`teamlibrary permission not specified`** (or similar): manifest needs a new permission. Edit `~/figmosha2/plugin/manifest.json` in place (that is the file Figma loads — no copy step), then ask the user to **re-import** the plugin (Plugins → Development → Manage plugins → remove + Import again).
 - **Result looks weird / undefined**: you forgot `return`. The wrapper expects a value.
 - **Switch Figma file → plugin disconnects**: plugin is bound to the open file. After switching, ask user to Run plugin again.
 
 The error response includes a `hint` field for common cases — read it before debugging.
 
-## Where things live (user's setup)
+## Where things live (macOS, verified 2026-08-10)
 
-- Bridge: `~/figmosha2/` on WSL Ubuntu at `192.168.31.105` (passwordless ssh as `user`)
-- Plugin source: `~/figmosha2/plugin/`
-- Plugin Windows-side (for Figma to import): `C:\Users\User\figmosha-plugin\`
-- Tmux session: `figmosha-bridge`
-- Log: `/tmp/figmosha-bridge.log` on WSL
+Everything is **local to this Mac** — bridge, plugin and Figma Desktop are all on the same machine.
+There is no WSL host, no Windows copy, and no ssh/rsync step. *(This section previously described a
+WSL Ubuntu box at `192.168.31.105` with a `C:\Users\User\figmosha-plugin\` copy — obsolete, removed.)*
 
-To restart bridge from this dev machine:
+- Bridge: `~/figmosha2/bridge.py`, run by `./venv/bin/python` inside a detached tmux session
+  `figmosha-bridge` (see `start-bridge.sh`)
+- Log: `/tmp/figmosha-bridge.log`
+- Plugin source **= what Figma loads**: `~/figmosha2/plugin/{manifest.json,code.js,ui.html}`.
+  Figma Desktop references those exact paths (`~/Library/Application Support/Figma/settings.json` →
+  `localFileExtensions`, plugin id `figmosha-…`), so an edit here is live after a re-Run — **no copy step**.
+- Auto-start: the `SessionStart` hook in `$CLAUDE_CONFIG_DIR/settings.json` runs
+  `curl -sf localhost:8787/status || bash ~/figmosha2/start-bridge.sh`, so the bridge is normally already
+  up. The plugin itself must still be started by hand in each Figma file window.
 
 ```bash
-ssh user@192.168.31.105 'bash ~/figmosha2/start-bridge.sh'
+bash ~/figmosha2/start-bridge.sh     # start or restart (kills the old tmux session first)
+tmux attach -t figmosha-bridge       # watch it
+tmux kill-session -t figmosha-bridge # stop it
 ```
 
-When you edit `plugin/code.js` or `plugin/manifest.json` here, sync to user's Windows copy and ask them to re-Run (or re-Import if manifest changed):
-
-```bash
-rsync -azc -e "ssh -o UserKnownHostsFile=/tmp/khosts" \
-  plugin/code.js plugin/ui.html plugin/manifest.json \
-  user@192.168.31.105:figmosha-plugin-staging/
-ssh user@192.168.31.105 'cp ~/figmosha-plugin-staging/* /mnt/c/Users/User/figmosha-plugin/'
-```
+After editing `plugin/code.js` or `plugin/ui.html`: ask the user to re-Run the plugin
+(Plugins → Development → Figmosha Bridge). After editing `plugin/manifest.json` (e.g. adding a
+permission): ask them to **re-import** it (Plugins → Development → Manage plugins → remove, then
+Import from `~/figmosha2/plugin/manifest.json`).

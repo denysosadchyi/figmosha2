@@ -28,6 +28,17 @@ const logEl = document.getElementById("log");
 let ws = null;
 let reconnectTimer = null;
 const recentLog = [];
+let identity = { fileKey: null, name: null };
+
+function sendHello() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify({
+      type: "hello", version: "2.0",
+      fileKey: identity.fileKey, name: identity.name,
+    }));
+  } catch (e) {}
+}
 
 function log(line) {
   const ts = new Date().toTimeString().slice(0, 8);
@@ -59,8 +70,10 @@ function connect() {
 
   ws.onopen = () => {
     setStatus("connected", "ok");
-    log("[ws] connected");
-    try { ws.send(JSON.stringify({ type: "hello", version: "2.0" })); } catch (e) {}
+    log("[ws] connected" + (identity.name ? ` as ${identity.name}` : ""));
+    sendHello();
+    // In case identity hasn't arrived from the plugin yet, ask for it.
+    parent.postMessage({ pluginMessage: { type: "need-identity" } }, "*");
   };
 
   ws.onmessage = (e) => {
@@ -92,6 +105,14 @@ function connect() {
 window.onmessage = (e) => {
   const m = e.data && e.data.pluginMessage;
   if (!m) return;
+  if (m.type === "identity") {
+    identity = { fileKey: m.fileKey || null, name: m.name || null };
+    document.getElementById("server").textContent =
+      (identity.name || "?") + " · " + SERVER;
+    log(`[id] file=${identity.name}`);
+    sendHello();  // (re-)register this connection under the file name
+    return;
+  }
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     log(`[drop] ws not open, ${m.type} id=${shortId(m.id)}`);
     return;
