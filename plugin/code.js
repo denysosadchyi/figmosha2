@@ -1,4 +1,4 @@
-figma.showUI(__html__, { width: 360, height: 260, title: "Figmosha Bridge" });
+figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 
 function safeStringify(value) {
   if (value === undefined) return null;
@@ -18,12 +18,41 @@ function asText(value, logs) {
 
 // ─── helpers exposed as `h.*` to every exec ──────────────────────────────
 
+// Set for the duration of one exec so helpers can surface warnings through the
+// same `print()` the user's code gets. No-op outside an exec.
+let CURRENT_PRINT = () => {};
+
 async function resolveVar(varOrId) {
   if (varOrId == null) return null;
-  if (typeof varOrId === "string") {
+  if (typeof varOrId !== "string") return varOrId;
+
+  // Local variables are addressed as "VariableID:1:23"; anything else is a
+  // library key, which has to be imported rather than looked up.
+  if (varOrId.indexOf("VariableID:") === 0) {
     return await figma.variables.getVariableByIdAsync(varOrId);
   }
-  return varOrId;
+  const local = await figma.variables.getVariableByIdAsync(varOrId);
+  if (local) return local;
+  try {
+    return await figma.variables.importVariableByKeyAsync(varOrId);
+  } catch (e) {
+    return null;
+  }
+}
+
+// Copy a paint array before mutating it — node.fills/strokes are frozen.
+function copyPaints(node, prop, who) {
+  const paints = node[prop];
+  if (typeof paints === "symbol") {
+    throw new Error(
+      who + ": '" + node.name + "' has mixed " + prop +
+      "; set the paint per-range, or unify " + prop + " on the node first"
+    );
+  }
+  if (!Array.isArray(paints)) {
+    throw new Error(who + ": '" + node.name + "' has no " + prop);
+  }
+  return JSON.parse(JSON.stringify(paints));
 }
 
 const HELPERS = {
@@ -31,7 +60,8 @@ const HELPERS = {
   async bF(node, idx, varOrId) {
     const v = await resolveVar(varOrId);
     if (!v) throw new Error("h.bF: variable not found: " + varOrId);
-    const f = JSON.parse(JSON.stringify(node.fills));
+    const f = copyPaints(node, "fills", "h.bF");
+    if (!f[idx]) throw new Error("h.bF: '" + node.name + "' has no fill at index " + idx);
     f[idx] = figma.variables.setBoundVariableForPaint(f[idx], "color", v);
     node.fills = f;
     return v;
@@ -41,7 +71,8 @@ const HELPERS = {
   async bS(node, idx, varOrId) {
     const v = await resolveVar(varOrId);
     if (!v) throw new Error("h.bS: variable not found: " + varOrId);
-    const s = JSON.parse(JSON.stringify(node.strokes));
+    const s = copyPaints(node, "strokes", "h.bS");
+    if (!s[idx]) throw new Error("h.bS: '" + node.name + "' has no stroke at index " + idx);
     s[idx] = figma.variables.setBoundVariableForPaint(s[idx], "color", v);
     node.strokes = s;
     return v;
@@ -94,11 +125,21 @@ const HELPERS = {
       : (rootNode.type === "TEXT" ? [rootNode] : []);
     const seen = new Set();
     const fonts = [];
+    const skipped = [];
     for (const t of texts) {
-      if (typeof t.fontName === "symbol") continue;
+      // Mixed-font nodes can't be loaded wholesale; editing one later throws a
+      // confusing "font not loaded" far from here, so say it out loud now.
+      if (typeof t.fontName === "symbol") { skipped.push(t.name); continue; }
       const fn = t.fontName;
       const key = fn.family + "|" + fn.style;
       if (!seen.has(key)) { seen.add(key); fonts.push(fn); }
+    }
+    if (skipped.length) {
+      CURRENT_PRINT(
+        "h.withFonts: skipped " + skipped.length + " mixed-font text node(s): " +
+        skipped.slice(0, 5).join(", ") + (skipped.length > 5 ? ", …" : "") +
+        " — editing them will fail unless you load each range manually"
+      );
     }
     await Promise.all(fonts.map((f) => figma.loadFontAsync(f)));
     return await asyncFn();
@@ -166,6 +207,7 @@ figma.ui.onmessage = async (msg) => {
     figma.ui.postMessage({ type: "log", id, text });
   };
 
+  CURRENT_PRINT = print;
   try {
     const fn = new Function(
       "figma", "print", "h",
@@ -186,5 +228,7 @@ figma.ui.onmessage = async (msg) => {
       text: (e && e.message) || String(e),
       stack: (e && e.stack) || null,
     });
+  } finally {
+    CURRENT_PRINT = () => {};
   }
 };
