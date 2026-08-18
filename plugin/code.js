@@ -31,8 +31,17 @@ async function resolveVar(varOrId) {
   if (varOrId.indexOf("VariableID:") === 0) {
     return await figma.variables.getVariableByIdAsync(varOrId);
   }
-  const local = await figma.variables.getVariableByIdAsync(varOrId);
+  // A library key is not a well-formed id, and getVariableByIdAsync rejects
+  // those by throwing rather than returning null — so this has to be guarded,
+  // otherwise the import below is unreachable for the very case it exists for.
+  let local = null;
+  try {
+    local = await figma.variables.getVariableByIdAsync(varOrId);
+  } catch (e) {
+    local = null;
+  }
   if (local) return local;
+
   try {
     return await figma.variables.importVariableByKeyAsync(varOrId);
   } catch (e) {
