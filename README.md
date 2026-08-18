@@ -2,9 +2,9 @@
 
 Drive Figma from your terminal / Claude Code / any HTTP client. A tiny custom plugin sits inside Figma Desktop and holds a WebSocket to a local Python server — you send Figma Plugin API code over HTTP and get the result back.
 
-No Playwright. No browser automation. No clipboard hacks. No screenshots.
+No clipboard hacks. No screenshots.
 
-Measured **150–950× faster** than browser-driven approaches: reads ~5 ms, mutations ~30 ms, library component import ~150 ms.
+Fast enough to feel synchronous: reads ~5 ms, mutations ~30 ms, library component import ~150 ms.
 
 ## Why this exists
 
