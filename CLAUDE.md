@@ -40,12 +40,17 @@ The plugin runtime exposes a small helper namespace. Use these to keep scripts s
 | `await h.bN(node, prop, varOrId)` | Bind numeric prop (radius, padding, size...) |
 | `h.findByName(root, name)` | First descendant by exact name |
 | `h.findAllByName(root, name)` | All descendants by exact name |
-| `h.dumpTree(node, {maxDepth, showSize, showText})` | Indented tree string |
+| `h.dumpTree(node, {maxDepth, showSize, showText, showLayout})` | Indented tree string |
 | `await h.withFonts(root, asyncFn)` | Loads every unique font in subtree, then runs `asyncFn` |
 | `await h.setText(node, text)` | Set TEXT node chars with auto font load |
 | `h.cloneNext(node, {direction, gap, name})` | Clone + place adjacent (`right`/`left`/`up`/`down`) |
 | `await h.variant(instance, props)` | Wrapper around `instance.setProperties(...)` |
 | `await h.variantsOf(instance)` | `{ current, groups, all }` for the component set |
+| `h.sel()` | Currently selected nodes as `{id,name,type,w,h}` |
+| `h.resolve(idOrAlias)` | Node by id, or the aliases `page` / `sel` |
+| `h.hex("#1a2b3c")` | Hex to Figma's 0..1 `{r,g,b}` |
+| `h.solid("#1a2b3c", opacity?)` | Ready-to-assign paint array |
+| `h.frame(parent, opts)` | Frame with auto-layout applied in the right order |
 | `await h.node(id)` | Shorthand for `figma.getNodeByIdAsync(id)` |
 | `await h.var_(idOrKey)` | Resolve a variable from instance, local id, or library key |
 | `await h.importComp(key)` | `figma.importComponentByKeyAsync(key)` |
@@ -90,6 +95,8 @@ await h.withFonts(root, async () => {
 
 | Command | Equivalent JS | Use case |
 |---|---|---|
+| `figmosha doctor` | — | Diagnose bridge → plugin → Figma, with the fix for each break |
+| `figmosha sel` | `h.sel()` | What the user has selected right now |
 | `figmosha tree <id>` | `h.dumpTree(await h.node(id))` | Explore node structure |
 | `figmosha find <id> name=Button` | `(await h.node(id)).findAll(n => n.name === "Button")` | Locate by name |
 | `figmosha find <id> name~Btn` | `findAll(n => n.name.includes("Btn"))` | Substring name match |
@@ -98,10 +105,16 @@ await h.withFonts(root, async () => {
 | `figmosha text <id> "новий"` | `await h.setText(n, "новий")` | Edit text safely |
 | `figmosha variant <id> "Property 1=Default"` | `await n.setProperties({...})` | Switch variant |
 | `figmosha clone <id> --right --gap 100` | `h.cloneNext(n, {direction:'right',gap:100})` | Duplicate adjacent |
-| `figmosha rm <id>` | `n.remove()` | Delete |
+| `figmosha rm <id> [<id>…]` | `n.remove()` | Delete one or more |
 | `figmosha icomp <key>` | `(await h.importComp(key)).createInstance()` | Pull from library |
 
+Anywhere an id is taken, `page` and `sel` work too — `figmosha tree sel --layout`
+dumps the selected subtree without hunting for its id first.
+
 Use subcommands when the op fits one of these. Fall back to `exec` for anything else.
+
+When the user says "this frame" or "the selected one", call `figmosha sel` — don't
+ask them to find an id by hand.
 
 ## How exec evaluates code
 
@@ -143,6 +156,15 @@ f.itemSpacing = 16               // 5. spacing/padding
 f.paddingTop = 24
 ```
 
+`h.frame` does all of that in the right order — prefer it:
+
+```js
+const f = h.frame(parent, {
+  layout: "V", spacing: 16, padding: [24, 16],
+  fill: "#ffffff", radius: 8, name: "Card",
+})
+```
+
 ### Two-stage workflow for big builds
 
 For complex builds (component sets with many variants + variable binding): split into Step 1 = build structure with hardcoded RGB; Step 2 = walk nodes by `name` and bind via `h.bF`/`h.bS`/`h.bN`. Verify each step independently.
@@ -164,31 +186,19 @@ return root.findAll(n => n.type === "TEXT").map(t => t.characters)
 
 - **`plugin not connected` (503)**: plugin window closed in Figma. Ask user to Run it again.
 - **Timeout (504)**: probably infinite loop or unresolved `await`. Ask user to close & re-run plugin.
-- **`teamlibrary permission not specified`** (or similar): manifest needs a new permission. Edit `plugin/manifest.json`, sync to user's Windows copy (`/mnt/c/Users/User/figmosha-plugin/manifest.json` on their WSL), ask user to **re-import** the plugin (Plugins → Development → Manage plugins → remove + Import again).
+- **`teamlibrary permission not specified`** (or similar): manifest needs a new permission. Edit `plugin/manifest.json`, sync it to wherever Figma imports the plugin from (see `CLAUDE.local.md`), then ask the user to **re-import** — Plugins → Development → Manage plugins → remove + Import again. A manifest change needs a re-import, not just a re-Run.
 - **Result looks weird / undefined**: you forgot `return`. The wrapper expects a value.
 - **Switch Figma file → plugin disconnects**: plugin is bound to the open file. After switching, ask user to Run plugin again.
 
 The error response includes a `hint` field for common cases — read it before debugging.
 
-## Where things live (user's setup)
+## Local setup
 
-- Bridge: `~/figmosha2/` on WSL Ubuntu at `192.168.31.105` (passwordless ssh as `user`)
-- Plugin source: `~/figmosha2/plugin/`
-- Plugin Windows-side (for Figma to import): `C:\Users\User\figmosha-plugin\`
-- Tmux session: `figmosha-bridge`
-- Log: `/tmp/figmosha-bridge.log` on WSL
+Machine-specific paths, hosts and sync commands live in `CLAUDE.local.md`,
+which is gitignored. If it's missing, ask where the bridge runs and where
+Figma reads the plugin from, then write it there.
 
-To restart bridge from this dev machine:
-
-```bash
-ssh user@192.168.31.105 'bash ~/figmosha2/start-bridge.sh'
-```
-
-When you edit `plugin/code.js` or `plugin/manifest.json` here, sync to user's Windows copy and ask them to re-Run (or re-Import if manifest changed):
-
-```bash
-rsync -azc -e "ssh -o UserKnownHostsFile=/tmp/khosts" \
-  plugin/code.js plugin/ui.html plugin/manifest.json \
-  user@192.168.31.105:figmosha-plugin-staging/
-ssh user@192.168.31.105 'cp ~/figmosha-plugin-staging/* /mnt/c/Users/User/figmosha-plugin/'
-```
+After editing `plugin/code.js` or `plugin/ui.html`, copy them to wherever
+Figma imports the plugin from and ask the user to re-Run it — a running plugin
+keeps the code it started with. If `manifest.json` changed, they need to
+re-Import, not just re-Run.
