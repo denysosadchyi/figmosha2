@@ -206,41 +206,60 @@ def test_disconnect_fails_inflight_requests():
 
 # ─── the single plugin slot ───────────────────────────────────────────────
 
-def test_live_plugin_keeps_the_slot():
+def test_two_files_coexist_and_need_a_target():
+    """Multi-file contract: one plugin per open file, all coexist; an exec with
+    two files connected must name its target (409 otherwise)."""
     async def go():
         c = await make_client()
-        async with FakePlugin(c, answer_ping=True):
-            second = await c.ws_connect("/plugin", headers={"Origin": "null"})
-            msg = await asyncio.wait_for(second.receive(), timeout=5)
-            assert "already connected" in json.loads(msg.data)["text"]
-            await asyncio.wait_for(second.receive(), timeout=5)
-            assert second.close_code == 1008
+        async with FakePlugin(c) as a, FakePlugin(c) as b:
+            await a.ws.send_str(json.dumps(
+                {"type": "hello", "version": "test", "name": "FileA"}))
+            await b.ws.send_str(json.dumps(
+                {"type": "hello", "version": "test", "name": "FileB"}))
+            await asyncio.sleep(0.1)
+
+            r = await c.get("/targets")
+            files = (await r.json())["files"]
+            assert sorted(f["name"] for f in files) == ["FileA", "FileB"]
+
+            r = await c.post("/exec", json={"code": "return 1", "timeout": 2})
+            assert r.status == 409  # ambiguous — must name a target
+
+            r = await c.post("/exec", json={"code": "return 1", "timeout": 5,
+                                            "target": "FileA"})
+            assert r.status == 200
+            assert a.seen_codes and not b.seen_codes
         await c.close()
     run(go())
 
 
-def test_silent_plugin_is_superseded():
+def test_same_file_reconnect_replaces_stale():
+    """A plugin re-Run in the same file takes over at `hello` time — the stale
+    connection is closed and the new one serves; no reconnect lockout."""
     async def go():
         c = await make_client()
-        async with FakePlugin(c) as first:
-            first.go_silent()
-            async with FakePlugin(c) as second:
-                # The bridge spends up to a second probing the incumbent before
-                # handing the slot over, and anything sent during that window is
-                # still addressed to the dying socket — it comes back as
-                # "plugin reconnected mid-request" rather than being queued.
-                # What's guaranteed is that the handover completes and the new
-                # plugin serves; retry until it does.
-                deadline = asyncio.get_running_loop().time() + 5
-                r = None
-                while asyncio.get_running_loop().time() < deadline:
-                    r = await c.post("/exec", json={"code": "return 1", "timeout": 2})
-                    if r.status == 200:
-                        break
-                    await asyncio.sleep(0.2)
-                assert r is not None and r.status == 200
-                assert second.seen_codes, "exec never reached the new plugin"
-                assert first.seen_codes == [], "stale socket was still being used"
+        first = FakePlugin(c)
+        await first.__aenter__()
+        await first.ws.send_str(json.dumps(
+            {"type": "hello", "version": "test", "name": "FileA"}))
+        await asyncio.sleep(0.1)
+        first.go_silent()
+
+        async with FakePlugin(c) as second:
+            await second.ws.send_str(json.dumps(
+                {"type": "hello", "version": "test", "name": "FileA"}))
+            await asyncio.sleep(0.2)
+
+            r = await c.get("/targets")
+            files = (await r.json())["files"]
+            assert [f["name"] for f in files] == ["FileA"], files
+
+            r = await c.post("/exec", json={"code": "return 1", "timeout": 5,
+                                            "target": "FileA"})
+            assert r.status == 200
+            assert second.seen_codes, "exec never reached the new plugin"
+            assert first.seen_codes == [], "stale socket was still being used"
+        await first.__aexit__()
         await c.close()
     run(go())
 

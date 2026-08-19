@@ -47,9 +47,11 @@ DEFAULT_PORT = int(os.environ.get("FIGMOSHA_PORT", "8787"))
 
 HOST = DEFAULT_HOST
 PORT = DEFAULT_PORT
+TARGET = None  # which connected Figma file to route to (file name / fileKey / substring)
+PARALLEL = False  # skip the bridge's per-file lock — READ-ONLY scripts only
 
 KNOWN_CMDS = {
-    "exec", "status", "doctor", "sel", "tree", "find", "text", "variant",
+    "exec", "status", "targets", "clear", "doctor", "sel", "tree", "find", "text", "variant",
     "clone", "rm", "import-component", "icomp",
 }
 
@@ -93,11 +95,15 @@ def _request(method, path, payload=None, timeout=65):
 
 
 def _exec(code, timeout=60):
+    payload = {"code": code, "timeout": timeout}
+    if TARGET:
+        payload["target"] = TARGET
+    if PARALLEL:
+        payload["parallel"] = True
     # The socket deadline has to outlast the server-side one, otherwise a long
     # --timeout dies here at the default 65s while the bridge is still waiting,
     # and we lose the bridge's own error payload (including any hint).
-    return _request("POST", "/exec", {"code": code, "timeout": timeout},
-                    timeout=timeout + 5)
+    return _request("POST", "/exec", payload, timeout=timeout + 5)
 
 
 def _emit(resp, raw=False):
@@ -110,6 +116,8 @@ def _emit(resp, raw=False):
 
     if resp.get("ok") is False:
         print(f"figmosha: {resp.get('error', 'unknown')}", file=sys.stderr)
+        if resp.get("warning"):
+            print(f"   ⚠ {resp['warning']}", file=sys.stderr)
         if resp.get("hint"):
             print(f"   hint: {resp['hint']}", file=sys.stderr)
         if resp.get("stack"):
@@ -128,6 +136,33 @@ def cmd_status(args):
     status, resp = _request("GET", "/status")
     print(json.dumps(resp, indent=2))
     return 0 if status == 200 else 2
+
+
+def cmd_targets(args):
+    status, resp = _request("GET", "/targets")
+    files = resp.get("files") or []
+    if not files:
+        print("no files connected — Run the Figmosha Bridge plugin in each Figma file",
+              file=sys.stderr)
+        return 1
+    for f in files:
+        name = f.get("name") or "(unidentified)"
+        key = f.get("fileKey") or "-"
+        print(f"{name}\t{key}\t{f.get('conn')}")
+    return 0
+
+
+def cmd_clear(args):
+    """Drop a file's abandoned-script interlock after a 504."""
+    payload = {"target": TARGET} if TARGET else {}
+    status, resp = _request("POST", "/clear", payload)
+    if status != 200:
+        print(resp.get("error", "clear failed"), file=sys.stderr)
+        return 2
+    cleared = resp.get("cleared") or []
+    print(f"cleared {len(cleared)} abandoned script(s) on {resp.get('file')!r}"
+          + (f": {', '.join(cleared)}" if cleared else ""))
+    return 0
 
 
 def cmd_sel(args):
@@ -339,6 +374,11 @@ def cmd_import_component(args):
 def _add_common_flags(p):
     p.add_argument("--timeout", "-t", type=int, default=60)
     p.add_argument("--raw", action="store_true", help="print full JSON response")
+    p.add_argument("--target", "-T", default=None,
+                   help="which connected file to route to (name, fileKey, or substring)")
+    p.add_argument("--parallel", action="store_true",
+                   help="bypass the per-file lock so reads can fan out. "
+                        "READ-ONLY scripts only — a parallel writer interleaves.")
 
 
 def build_parser():
@@ -352,6 +392,11 @@ def build_parser():
     sub = ap.add_subparsers(dest="cmd")
 
     sub.add_parser("status")
+    sub.add_parser("targets", help="list connected Figma files (name / fileKey / conn)")
+
+    p_clear = sub.add_parser("clear",
+                             help="drop a file's abandoned-script interlock after a 504")
+    _add_common_flags(p_clear)
 
     p_doctor = sub.add_parser("doctor", help="diagnose the bridge -> plugin -> Figma chain")
     _add_common_flags(p_doctor)
@@ -430,12 +475,16 @@ def main():
         ap.print_help()
         sys.exit(2)
 
-    global HOST, PORT
+    global HOST, PORT, TARGET, PARALLEL
     HOST = args.host
     PORT = args.port
+    TARGET = getattr(args, "target", None)
+    PARALLEL = getattr(args, "parallel", False)
 
     dispatch = {
         "status": cmd_status,
+        "targets": cmd_targets,
+        "clear": cmd_clear,
         "doctor": cmd_doctor,
         "sel": cmd_sel,
         "exec": cmd_exec,

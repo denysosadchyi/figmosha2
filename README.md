@@ -96,8 +96,10 @@ you guessing which half broke.
 
 ### What it can't do
 
-- **Anything outside the open file.** The plugin is bound to whichever Figma
-  file was open when you ran it. No cross-file operations, no file browser.
+- **Anything outside an open file.** Each plugin is bound to the Figma file it
+  runs in; the bridge can route between files that run the plugin (see
+  [Multiple files & concurrency](#multiple-files--concurrency)), but there are
+  no cross-file operations inside one script and no file browser.
 - **The parts Figma keeps to itself** — publishing to Community, plugin icons,
   account settings, comments (use the REST API for those).
 - **Run without Figma Desktop open.** This is a bridge, not a headless renderer.
@@ -105,15 +107,17 @@ you guessing which half broke.
 
 ## HTTP API
 
-The CLI is a convenience; the wire protocol is three endpoints and no
+The CLI is a convenience; the wire protocol is a handful of endpoints and no
 authentication beyond being on the machine.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /exec` | `{code, timeout?}` | `{ok, result, value, logs, elapsed_ms}` |
-| `GET /status` | — | `{plugin_connected, pending}` |
+| `POST /exec` | `{code, timeout?, target?, parallel?}` | `{ok, result, value, logs, elapsed_ms}` |
+| `GET /status` | — | `{plugin_connected, files, pending, abandoned}` |
+| `GET /targets` | — | `{files: [{name, fileKey, conn}]}` — connected Figma files |
+| `POST /clear` | `{target?, force?}` | drops a file's abandoned-script interlock |
 | `GET /` | — | service banner listing the endpoints |
-| `WS /plugin` | — | where the Figma plugin connects |
+| `WS /plugin` | — | where the Figma plugin connects (one per open file) |
 
 ```bash
 curl -s -X POST http://localhost:8787/exec \
@@ -128,6 +132,53 @@ curl -s -X POST http://localhost:8787/exec \
 - No plugin connected is `503`; a script that outlives its `timeout` is `504`.
 - Bodies and WebSocket frames are capped at 16 MB, which is the practical limit
   on how large an export you can pull through in one call.
+
+## Multiple files & concurrency
+
+The bridge holds **one connection per open Figma file** running the plugin, not
+one globally. Run the plugin in each file you want to drive; the plugin reports
+its identity (`figma.root.name`, and `figma.fileKey` where available), and the
+bridge routes by it.
+
+```bash
+python figmosha.py targets                          # name / fileKey / conn per file
+python figmosha.py exec "return figma.root.name" -T "Component Library"
+curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Component Library"}'
+```
+
+Target resolution: exact file name (case-insensitive) → exact `fileKey` →
+unambiguous substring of the name.
+
+- No target with exactly one file connected routes there — the old behavior.
+- No target with two or more connected is `409` ("N files connected — specify a
+  target"), and so is an ambiguous substring. Nothing connected stays `503`.
+- Two connected windows reporting the same name are refused, not guessed — the
+  `409` lists both connections so you can close one.
+- Re-running the plugin in a file replaces its stale connection at `hello` time,
+  so a re-Run never locks you out.
+
+**Execs are serialized per file.** Each file's plugin sandbox is a
+single-threaded async message handler over one shared document and one shared
+undo stack — two concurrent scripts interleave at every `await`, invalidating
+each other's `findAll` snapshots mid-run. The bridge therefore takes a per-file
+lock around `/exec`, so concurrent callers on the same file run one after
+another, and callers on different files don't wait on each other. One exec is
+one transaction: a read-modify-write split across two calls still lets another
+writer land in the gap.
+
+- Read-only scripts can pass `--parallel` (`{"parallel": true}`) to bypass the
+  lock and fan out. Reads only — a parallel writer interleaves exactly as before.
+- **A `504` does not mean the write didn't happen.** A script already running in
+  the sandbox cannot be killed, so on timeout the bridge marks it *abandoned*
+  and returns the `504` with a `warning` and the request id. While a file has an
+  abandoned script, further execs on it return `409` instead of racing an
+  invisible writer. The interlock lifts by itself when the orphan finally
+  replies, or manually with `figmosha.py clear -T <file>` (`{"force": true}` on
+  `/exec` pushes past it).
+- Long loops can cooperate with cancellation: `h.ck()` throws once the bridge
+  has abandoned the run, so a chunked sweep calling it each iteration stops
+  instead of mutating under the next caller. `h.aborted()` is the non-throwing
+  check.
 
 ## Security
 
