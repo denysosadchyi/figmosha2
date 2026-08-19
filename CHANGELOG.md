@@ -8,6 +8,42 @@ After upgrading, **re-run the plugin in Figma** — a running plugin keeps the
 code it started with, so new helpers won't exist until you do. If
 `plugin/manifest.json` changed, re-*import* it rather than just re-running.
 
+## [2.2.0] — 2026-08-19
+
+### Added
+
+- **Multiple Figma files at once.** The bridge now keeps one connection per open
+  file running the plugin instead of one globally. The plugin reports its
+  identity (`figma.root.name`, `figma.fileKey` where available); `/exec` takes a
+  `target` (CLI: `--target` / `-T`) resolved by exact name → fileKey →
+  unambiguous substring. One file connected and no target keeps the old
+  behavior; two or more without a target is `409`, never a guess. New
+  `GET /targets` endpoint and `figmosha targets` command list connected files.
+- **Per-file exec lock.** Each file's plugin sandbox is a single-threaded async
+  handler over one shared document — two concurrent scripts interleave at every
+  `await`. `/exec` now serializes per connection, so concurrent callers on the
+  same file run one after another; different files don't wait on each other.
+  Read-only scripts can bypass the lock with `parallel: true` (CLI:
+  `--parallel`) to fan out.
+- **Abandoned-run interlock.** A script that outlives its `timeout` cannot be
+  killed, so the `504` now carries a `warning` and the request id, and the file
+  refuses further execs with `409` until the orphan finally replies (logged) —
+  instead of letting the next caller mutate under a still-running script. Lift
+  it manually with `POST /clear` / `figmosha clear -T <file>`; `force: true` on
+  `/exec` pushes past it. `GET /status` reports `files` and `abandoned`.
+- **Cooperative cancellation: `h.ck()` / `h.aborted()`.** The bridge signals
+  abandoned run ids to the plugin; a chunked sweep calling `h.ck()` each
+  iteration throws and stops instead of mutating under the next caller.
+
+### Changed
+
+- A plugin re-Run in the same file replaces its stale connection at `hello`
+  time (no reconnect lockout); the previous single-slot
+  "already connected" refusal is gone. In-flight requests routed to a dead
+  connection fail fast instead of hanging, and a dead connection drops its
+  abandoned-script interlock with it.
+- CLI error output now surfaces the response's `warning` field.
+
 ## [2.1.0] — 2026-08-18
 
 ### Security
