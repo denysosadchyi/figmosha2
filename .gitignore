@@ -17,3 +17,6 @@ __pycache__/
 
 # Machine-specific instructions
 CLAUDE.local.md
+
+# Local scratch scripts (client work — never committed)
+scratch/
