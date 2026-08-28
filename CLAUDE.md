@@ -34,19 +34,19 @@ python figmosha.py targets                      # list connected files: name / f
 curl -s http://localhost:8787/targets
 
 # -T is a per-subcommand flag — it goes AFTER the subcommand, never before it
-python figmosha.py exec "return figma.root.name" -T "Design System"
-python figmosha.py tree 286:110 -T "Design System"
-curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Color"}'
+python figmosha.py exec "return figma.root.name" -T "Component Library"
+python figmosha.py tree 123:456 -T "Component Library"
+curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Icons"}'
 ```
 
 `target` matching (`resolve_target` in `bridge.py`): exact file name (case-insensitive) → exact
 `fileKey` → unambiguous substring of the name.
 
-- The name is `figma.root.name` as the plugin reports it — **verify with `targets`, don't assume**
-  (the colors file reports as `Color`, singular, not `Colors`).
-- **`fileKey` targeting does not work in this setup** — the plugin reports `fileKey: null` (shown as `-`
-  in `targets`), so the file keys in the project registry are for `importComponentByKeyAsync`, not for
-  `-T`. Match by name only.
+- The name is `figma.root.name` as the plugin reports it, which is often not the name you remember —
+  a trailing plural, a rename that never propagated. **Verify with `targets`, don't assume.**
+- **`fileKey` targeting does not work for a local dev plugin** — it reports `fileKey: null` (shown as
+  `-` in `targets`). A file key is still what `importComponentByKeyAsync` needs; it is just not usable
+  as a `-T`. Match by name only.
 
 - **No target + exactly 1 file connected** → routed there (the old default).
 - **No target + 2 or more connected** → **HTTP 409** `"N files connected — specify a target"`.
@@ -77,8 +77,8 @@ While a file has an abandoned script, further execs on it return **409** rather 
 writer. The interlock lifts by itself when the orphan finally replies (logged `[orphan]`), or manually:
 
 ```bash
-python figmosha.py clear -T "Design System"       # drop the interlock
-curl -s -X POST http://localhost:8787/clear -d '{"target":"Design System"}'
+python figmosha.py clear -T "Component Library"   # drop the interlock
+curl -s -X POST http://localhost:8787/clear -d '{"target":"Component Library"}'
 ```
 
 `{"force": true}` pushes past the interlock if you know the orphan is harmless. `GET /status` reports
@@ -97,9 +97,8 @@ curl -s -X POST http://localhost:8787/clear -d '{"target":"Design System"}'
   so one file open in two windows looped forever: each side kicked the other, the loser reconnected
   2s later and kicked back. Only a connection whose socket is already closed is dropped.
 
-Agent-level rules (who may write, read-only auditors, and the operations that still demand a single
-owner by policy — `/purge-components`) live in `~/.claude/CLAUDE.md` §Agents & pipelines. Note the lock
-makes concurrent writers **corruption-safe, not conflict-safe**: it orders writes, it cannot tell that
+If you drive this bridge from several agents, keep your own rules about who may write where. Note the
+lock makes concurrent writers **corruption-safe, not conflict-safe**: it orders writes, it cannot tell that
 two agents meant to change the same node. Overlapping writers = last write wins, silently. Partition by
 **ownership of mains / variants / variables — not by frame or screen**: a main-component or variable edit
 propagates file-wide, into frames the other writer has already verified.
@@ -288,8 +287,8 @@ WSL Ubuntu box at `192.168.31.105` with a `C:\Users\User\figmosha-plugin\` copy 
 - Plugin source **= what Figma loads**: `~/figmosha2/plugin/{manifest.json,code.js,ui.html}`.
   Figma Desktop references those exact paths (`~/Library/Application Support/Figma/settings.json` →
   `localFileExtensions`, plugin id `figmosha-…`), so an edit here is live after a re-Run — **no copy step**.
-- Auto-start: the `SessionStart` hook in `$CLAUDE_CONFIG_DIR/settings.json` runs
-  `curl -sf localhost:8787/status || bash ~/figmosha2/start-bridge.sh`, so the bridge is normally already
+- Auto-start: a session-start hook that runs
+  `curl -sf localhost:8787/status || bash ~/figmosha2/start-bridge.sh` keeps the bridge normally already
   up. The plugin itself must still be started by hand **once per open file (tab or window — either
   works)**; `⌘⌥P` re-runs it in the tab you are on.
 
