@@ -5,7 +5,30 @@ figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 function postIdentity() {
   let fileKey = null;
   try { fileKey = figma.fileKey || null; } catch (e) { /* not always available */ }
-  figma.ui.postMessage({ type: "identity", fileKey: fileKey, name: figma.root.name });
+  figma.ui.postMessage({
+    type: "identity",
+    fileKey: fileKey,
+    name: figma.root.name,
+    docSig: docSignature(),
+  });
+}
+
+// `figma.fileKey` is null for a local dev plugin and `figma.root.id` is "0:0" in
+// every file, so neither identifies the document. Page node ids are file-scoped
+// and stable, so their list distinguishes "the same file open in two windows"
+// (identical signature) from "two different files that happen to share a name"
+// (different signature). The bridge needs that to route a target safely.
+function docSignature() {
+  try {
+    const ids = figma.root.children.map((p) => p.id).join(",");
+    let hash = 5381;
+    for (let i = 0; i < ids.length; i++) {
+      hash = ((hash * 33) ^ ids.charCodeAt(i)) >>> 0;
+    }
+    return hash.toString(16);
+  } catch (e) {
+    return null;
+  }
 }
 postIdentity();
 

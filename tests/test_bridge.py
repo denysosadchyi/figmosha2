@@ -233,9 +233,10 @@ def test_two_files_coexist_and_need_a_target():
     run(go())
 
 
-def test_same_file_reconnect_replaces_stale():
-    """A plugin re-Run in the same file takes over at `hello` time — the stale
-    connection is closed and the new one serves; no reconnect lockout."""
+def test_same_file_reconnect_replaces_unresponsive():
+    """A plugin re-Run in the same file takes over at `hello` time — but only
+    after the incumbent fails a liveness probe, so a socket the OS has not torn
+    down yet (a laptop that slept) cannot keep the name to itself."""
     async def go():
         c = await make_client()
         first = FakePlugin(c)
@@ -248,7 +249,9 @@ def test_same_file_reconnect_replaces_stale():
         async with FakePlugin(c) as second:
             await second.ws.send_str(json.dumps(
                 {"type": "hello", "version": "test", "name": "FileA"}))
-            await asyncio.sleep(0.2)
+            # The incumbent is probed before it is dropped; its socket is still
+            # open, so the handover costs one probe timeout.
+            await asyncio.sleep(bridge.SLOT_PROBE_TIMEOUT + 0.4)
 
             r = await c.get("/targets")
             files = (await r.json())["files"]
@@ -260,6 +263,54 @@ def test_same_file_reconnect_replaces_stale():
             assert second.seen_codes, "exec never reached the new plugin"
             assert first.seen_codes == [], "stale socket was still being used"
         await first.__aexit__()
+        await c.close()
+    run(go())
+
+
+def test_same_document_in_two_windows_coexists():
+    """One file open in two tabs/windows reports the same name AND the same
+    docSig. Both connections stay — evicting a live one made the two sides kick
+    each other out in a loop — and a target resolves to the newest live view,
+    which is safe because both edit the same document."""
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c) as first, FakePlugin(c) as second:
+            for p in (first, second):
+                await p.ws.send_str(json.dumps(
+                    {"type": "hello", "version": "test",
+                     "name": "FileA", "docSig": "abc123"}))
+            await asyncio.sleep(bridge.SLOT_PROBE_TIMEOUT + 0.4)
+
+            files = (await (await c.get("/targets")).json())["files"]
+            assert [f["name"] for f in files] == ["FileA", "FileA"], files
+
+            r = await c.post("/exec", json={"code": "return 1", "timeout": 5,
+                                            "target": "FileA"})
+            assert r.status == 200, await r.text()
+            assert second.seen_codes, "target did not reach the newest live view"
+            assert not first.seen_codes
+        await c.close()
+    run(go())
+
+
+def test_two_documents_sharing_a_name_stay_ambiguous():
+    """Same name, different docSig = two genuinely different files. Neither may
+    be picked for the caller — a write would land in a file they did not choose."""
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c) as first, FakePlugin(c) as second:
+            await first.ws.send_str(json.dumps(
+                {"type": "hello", "version": "test",
+                 "name": "Untitled", "docSig": "aaa"}))
+            await second.ws.send_str(json.dumps(
+                {"type": "hello", "version": "test",
+                 "name": "Untitled", "docSig": "bbb"}))
+            await asyncio.sleep(bridge.SLOT_PROBE_TIMEOUT + 0.4)
+
+            r = await c.post("/exec", json={"code": "return 1", "timeout": 5,
+                                            "target": "Untitled"})
+            assert r.status == 409
+            assert not first.seen_codes and not second.seen_codes
         await c.close()
     run(go())
 
