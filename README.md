@@ -96,8 +96,10 @@ you guessing which half broke.
 
 ### What it can't do
 
-- **Anything outside the open file.** The plugin is bound to whichever Figma
-  file was open when you ran it. No cross-file operations, no file browser.
+- **Anything outside an open file.** Each plugin is bound to the Figma file it
+  runs in; the bridge can route between files that run the plugin (see
+  [Multiple files & concurrency](#multiple-files--concurrency)), but there are
+  no cross-file operations inside one script and no file browser.
 - **The parts Figma keeps to itself** — publishing to Community, plugin icons,
   account settings, comments (use the REST API for those).
 - **Run without Figma Desktop open.** This is a bridge, not a headless renderer.
@@ -105,15 +107,17 @@ you guessing which half broke.
 
 ## HTTP API
 
-The CLI is a convenience; the wire protocol is three endpoints and no
+The CLI is a convenience; the wire protocol is a handful of endpoints and no
 authentication beyond being on the machine.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /exec` | `{code, timeout?}` | `{ok, result, value, logs, elapsed_ms}` |
-| `GET /status` | — | `{plugin_connected, pending}` |
+| `POST /exec` | `{code, timeout?, target?, parallel?}` | `{ok, result, value, logs, elapsed_ms}` |
+| `GET /status` | — | `{plugin_connected, files, pending, abandoned}` |
+| `GET /targets` | — | `{files: [{name, fileKey, conn}]}` — connected Figma files |
+| `POST /clear` | `{target?, force?}` | drops a file's abandoned-script interlock |
 | `GET /` | — | service banner listing the endpoints |
-| `WS /plugin` | — | where the Figma plugin connects |
+| `WS /plugin` | — | where the Figma plugin connects (one per open file) |
 
 ```bash
 curl -s -X POST http://localhost:8787/exec \
@@ -128,6 +132,62 @@ curl -s -X POST http://localhost:8787/exec \
 - No plugin connected is `503`; a script that outlives its `timeout` is `504`.
 - Bodies and WebSocket frames are capped at 16 MB, which is the practical limit
   on how large an export you can pull through in one call.
+
+## Multiple files & concurrency
+
+The bridge holds **one connection per open Figma file** running the plugin, not
+one globally. Run the plugin in each file you want to drive; the plugin reports
+its identity (`figma.root.name`, `figma.fileKey` where available, and a document
+signature), and the bridge routes by it.
+
+```bash
+python figmosha.py targets                          # name / fileKey / conn per file
+python figmosha.py exec "return figma.root.name" -T "Component Library"
+curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Component Library"}'
+```
+
+Target resolution: exact file name (case-insensitive) → exact `fileKey` →
+unambiguous substring of the name.
+
+- No target with exactly one file connected routes there — the old behavior.
+- No target with two or more connected is `409` ("N files connected — specify a
+  target"), and so is an ambiguous substring. Nothing connected stays `503`.
+- **The same file open in several tabs or windows is fine.** Each view registers
+  its own connection, and `-T` routes to the newest live one. They edit the same
+  document, so the caller cannot end up in "the other copy"; `/status` flags the
+  extra views with `sameDocAs`.
+- **Two different files that happen to share a name are still refused**, not
+  guessed — the `409` lists both connections so you can close one. The bridge
+  tells the two cases apart with a `docSig`: `figma.fileKey` is null for a local
+  dev plugin and `figma.root.id` is `"0:0"` in every file, so the plugin hashes
+  its page node ids, which are file-scoped and stable.
+- Re-running the plugin in a file replaces its previous connection at `hello`
+  time **only if that connection is dead** — socket already closed, or no answer
+  to a 1s liveness ping. A live one keeps its slot, so a re-Run never locks you
+  out and two open views never evict each other.
+
+**Execs are serialized per file.** Each file's plugin sandbox is a
+single-threaded async message handler over one shared document and one shared
+undo stack — two concurrent scripts interleave at every `await`, invalidating
+each other's `findAll` snapshots mid-run. The bridge therefore takes a per-file
+lock around `/exec`, so concurrent callers on the same file run one after
+another, and callers on different files don't wait on each other. One exec is
+one transaction: a read-modify-write split across two calls still lets another
+writer land in the gap.
+
+- Read-only scripts can pass `--parallel` (`{"parallel": true}`) to bypass the
+  lock and fan out. Reads only — a parallel writer interleaves exactly as before.
+- **A `504` does not mean the write didn't happen.** A script already running in
+  the sandbox cannot be killed, so on timeout the bridge marks it *abandoned*
+  and returns the `504` with a `warning` and the request id. While a file has an
+  abandoned script, further execs on it return `409` instead of racing an
+  invisible writer. The interlock lifts by itself when the orphan finally
+  replies, or manually with `figmosha.py clear -T <file>` (`{"force": true}` on
+  `/exec` pushes past it).
+- Long loops can cooperate with cancellation: `h.ck()` throws once the bridge
+  has abandoned the run, so a chunked sweep calling it each iteration stops
+  instead of mutating under the next caller. `h.aborted()` is the non-throwing
+  check.
 
 ## Security
 
@@ -312,8 +372,8 @@ Currently hints cover: fills/strokes variable binding, frozen arrays, missing ma
 
 ## Limits / gotchas
 
-- Plugin is bound to the **currently open Figma file**. Switching files closes the plugin — re-Run it in the new file.
-- Only **one plugin instance** holds the bridge at a time. A second one is turned away with `Slot busy` — but if the first has gone silent (laptop slept, network changed) the newcomer takes over within about a second, so a genuine reconnect is never locked out.
+- Plugin is bound to the **Figma file it was run in**, and has to be run **once per open file** — `⌘⌥P` re-runs it in the tab you're on. A background tab keeps answering, so tabs work and separate windows aren't required.
+- The bridge keeps **one connection per open file**, and a live connection is never evicted: a same-file `hello` only replaces a connection whose socket is closed or that fails a 1s liveness ping. The same document open twice coexists; two *different* files sharing a name are refused with a `409`.
 - **Figma sync errors** ("Unable to establish connection to Figma after 10 seconds") sometimes appear when fetching nodes from non-current pages. If you need cross-page access: `await figma.loadAllPagesAsync()` first.
 - Bridge binds to `127.0.0.1` by default. For LAN access: `python bridge.py --host 0.0.0.0` (not recommended — anyone on your LAN can then run arbitrary code in your Figma).
 - Manifest changes (new permissions, etc.) require **re-importing** the plugin in Figma. `code.js` and `ui.html` changes are picked up on next Run.
@@ -335,7 +395,8 @@ chain and tells you which link is broken.
 | `pip install aiohttp` fails on Linux | Python externally-managed environment (PEP 668) | Use the venv approach (always preferred) or `pip install --user --break-system-packages aiohttp` |
 | Tmux not installed (Windows native) | `start-bridge.sh` needs bash + tmux | Use `.\start-bridge.ps1` — same thing, detached, with `-Restart` and `-Stop` |
 | `403 cross-origin requests are not allowed` | Something is adding an `Origin` header | Talk to the bridge directly, not through a proxy or a browser |
-| Plugin shows `Slot busy` | The plugin is already running in another Figma window | Close it there; this one retries every 15 s |
+| `409 ... different documents sharing a name` | Two distinct files are open under the same `figma.root.name` | Close one — the bridge won't guess which you meant |
+| A tab stopped answering `exec` | Its socket dropped (laptop slept, bridge restarted) | Re-Run the plugin in that tab (`⌘⌥P`); it re-registers by file name |
 | Helper missing: `h.X is not a function` | The running plugin still has the code it started with | Re-run the plugin in Figma after syncing `plugin/` |
 
 ## Project layout
