@@ -87,8 +87,15 @@ curl -s -X POST http://localhost:8787/clear -d '{"target":"Design System"}'
 - **Cooperative cancellation:** chunked sweeps should call **`h.ck()`** each iteration — it throws once
   the bridge has given up on that run, so the loop stops instead of mutating under the next caller.
   (Requires the plugin re-Run after 2026-08-10; harmless on older builds, which ignore `abort`.)
-- **Duplicate file names are refused, not guessed.** Two connected windows reporting the same
-  `figma.root.name` → 409 listing both conns. Close one.
+- **The same file open twice is fine** (2026-08-27). Each tab/window gets its own slot; the plugin reports
+  a `docSig` (hash of the page ids, since `figma.fileKey` is null for a dev plugin and `figma.root.id`
+  is `"0:0"` everywhere), so the bridge can tell two **views of one document** from two **different
+  files sharing a name**. Same signature → `-T` routes to the newest live view, and `/status` flags the
+  extra with `sameDocAs`. Different signatures → 409, close one; the write would otherwise land in a
+  file you did not pick.
+- **A live connection is never evicted.** Before this, a `hello` kicked out any same-named connection,
+  so one file open in two windows looped forever: each side kicked the other, the loser reconnected
+  2s later and kicked back. Only a connection whose socket is already closed is dropped.
 
 Agent-level rules (who may write, read-only auditors, and the operations that still demand a single
 owner by policy — `/purge-components`) live in `~/.claude/CLAUDE.md` §Agents & pipelines. Note the lock
@@ -261,7 +268,11 @@ return root.findAll(n => n.type === "TEXT").map(t => t.characters)
 - **Timeout (504)**: probably infinite loop or unresolved `await`. Ask user to close & re-run plugin.
 - **`teamlibrary permission not specified`** (or similar): manifest needs a new permission. Edit `~/figmosha2/plugin/manifest.json` in place (that is the file Figma loads — no copy step), then ask the user to **re-import** the plugin (Plugins → Development → Manage plugins → remove + Import again).
 - **Result looks weird / undefined**: you forgot `return`. The wrapper expects a value.
-- **Switch Figma file → plugin disconnects**: plugin is bound to the open file. After switching, ask user to Run plugin again.
+- **Switch Figma tab → the plugin keeps running.** Each tab holds its own bridge connection, and a
+  background tab still answers `exec` — **tabs in one window work; separate windows are not required**
+  (verified 2026-08-27: 4 files answered while Figma itself was unfocused). What is still per-document:
+  the plugin has to be **Run once in each tab** — `⌘⌥P` re-runs the last plugin in the current tab.
+  If a tab stops answering, Run it again there; the bridge slot re-registers by file name on reconnect.
 
 The error response includes a `hint` field for common cases — read it before debugging.
 
@@ -279,7 +290,8 @@ WSL Ubuntu box at `192.168.31.105` with a `C:\Users\User\figmosha-plugin\` copy 
   `localFileExtensions`, plugin id `figmosha-…`), so an edit here is live after a re-Run — **no copy step**.
 - Auto-start: the `SessionStart` hook in `$CLAUDE_CONFIG_DIR/settings.json` runs
   `curl -sf localhost:8787/status || bash ~/figmosha2/start-bridge.sh`, so the bridge is normally already
-  up. The plugin itself must still be started by hand in each Figma file window.
+  up. The plugin itself must still be started by hand **once per open file (tab or window — either
+  works)**; `⌘⌥P` re-runs it in the tab you are on.
 
 ```bash
 bash ~/figmosha2/start-bridge.sh     # start or restart (kills the old tmux session first)

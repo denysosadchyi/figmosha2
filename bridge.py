@@ -25,7 +25,8 @@ from aiohttp import web, WSMsgType
 
 
 PENDING: dict = {}        # rid -> {"future", "logs", "t0", "conn"}
-PLUGINS: dict = {}        # conn_id -> {"ws", "fileKey", "name"}
+PLUGINS: dict = {}        # conn_id -> {"ws", "fileKey", "name", "docSig"}
+SLOT_PROBE_TIMEOUT = 1.0  # how long an incumbent connection has to answer a ping
 LOCKS: dict = {}          # conn_id -> asyncio.Lock — one exec at a time per file
 ABANDONED: dict = {}      # rid -> {"conn", "t0", "timeout"} — timed out, may still be running
 
@@ -126,6 +127,34 @@ def find_hint(error_text):
     return None
 
 
+async def _still_alive(info, timeout: float = SLOT_PROBE_TIMEOUT) -> bool:
+    """Ping one plugin connection and wait for its pong.
+
+    An open socket is not a live plugin: a laptop that slept, or a Figma tab that
+    was closed uncleanly, leaves a socket the OS has not torn down yet. Only an
+    answered ping distinguishes that from a plugin that is simply idle — which
+    matters because the same file legitimately open in two tabs also produces two
+    live registrations, and those must NOT evict each other.
+    """
+    ws = info["ws"]
+    if ws.closed:
+        return False
+    fut = asyncio.get_event_loop().create_future()
+    info["pong"] = fut
+    try:
+        await ws.send_str(json.dumps({"type": "ping"}))
+    except Exception:
+        info.pop("pong", None)
+        return False
+    try:
+        await asyncio.wait_for(fut, timeout)
+        return True
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        return False
+    finally:
+        info.pop("pong", None)
+
+
 def _label(conn_id: str) -> str:
     info = PLUGINS.get(conn_id) or {}
     return info.get("name") or f"({conn_id[:8]})"
@@ -147,7 +176,7 @@ async def plugin_ws_handler(request: web.Request):
     # Reconnects never lock out: a stale same-file connection is replaced at
     # `hello` time, so no incumbent check is needed in the multi-file model.
     conn_id = str(uuid.uuid4())
-    PLUGINS[conn_id] = {"ws": ws, "fileKey": None, "name": None}
+    PLUGINS[conn_id] = {"ws": ws, "fileKey": None, "name": None, "docSig": None}
     print(f"[plugin] connected {conn_id[:8]} from {request.remote}")
 
     try:
@@ -169,28 +198,49 @@ async def plugin_ws_handler(request: web.Request):
             if mtype == "hello":
                 file_key = m.get("fileKey")
                 name = m.get("name")
-                # If the same file is already registered on an older connection
-                # (e.g. plugin re-Run without a clean close), drop the stale one.
+                doc_sig = m.get("docSig")
+                # Drop an older registration for the same file ONLY if its socket
+                # is already dead (plugin re-Run without a clean close).
+                #
+                # Evicting a LIVE one is what the previous build did, and with the
+                # same file open in two tabs/windows it looped forever: each side
+                # kicked the other out, the loser reconnected 2s later and kicked
+                # back. Two live views of one document are legitimate — keep both
+                # and let resolve_target pick (they edit the same file either way).
                 for cid, info in list(PLUGINS.items()):
                     if cid == conn_id:
                         continue
                     same = (file_key and info.get("fileKey") == file_key) or (
                         name and info.get("fileKey") is None and info.get("name") == name
                     )
-                    if same:
-                        print(f"[plugin] replacing stale connection for {name!r}")
-                        try:
-                            await info["ws"].close(code=1000, message=b"superseded")
-                        except Exception:
-                            pass
-                        PLUGINS.pop(cid, None)
+                    if not same:
+                        continue
+                    # Two live views of one document (same file in two tabs or
+                    # windows) — both stay; resolve_target routes by docSig.
+                    if (doc_sig is not None
+                            and info.get("docSig") == doc_sig
+                            and not info["ws"].closed):
+                        continue
+                    if await _still_alive(info):
+                        continue
+                    print(f"[plugin] dropping dead connection for {name!r}")
+                    try:
+                        await info["ws"].close(code=1000, message=b"superseded")
+                    except Exception:
+                        pass
+                    PLUGINS.pop(cid, None)
                 PLUGINS[conn_id]["fileKey"] = file_key
                 PLUGINS[conn_id]["name"] = name
+                PLUGINS[conn_id]["docSig"] = doc_sig
                 print(f"[plugin] hello v{m.get('version', '?')} "
-                      f"file={name!r} key={file_key}")
+                      f"file={name!r} key={file_key} sig={doc_sig}")
                 continue
             if mtype == "pong":
-                # Keepalive reply from newer plugin builds — nothing to do.
+                # Answer to a liveness probe: this slot is defended, so a new
+                # connection for the same file will not take it over.
+                fut = PLUGINS.get(conn_id, {}).pop("pong", None)
+                if fut is not None and not fut.done():
+                    fut.set_result(True)
                 continue
 
             rid = m.get("id")
@@ -258,10 +308,19 @@ def resolve_target(target):
     if len(exact) == 1:
         return exact[0]
     if len(exact) > 1:
+        # Same name, same document signature = one file open in several tabs or
+        # windows. Both views edit the same document, so routing to the newest
+        # live one is safe; the caller cannot end up in "the other copy".
+        sigs = {i.get("docSig") for _, i in exact}
+        if len(sigs) == 1 and None not in sigs:
+            return exact[-1]
+        # Same name, different documents (or a plugin build too old to report a
+        # signature) — genuinely ambiguous, and a write would land in a file the
+        # caller did not choose.
         conns = ", ".join(c[:8] for c, _ in exact)
         return None, (f"{len(exact)} connected files are named {target!r} "
-                      f"(conns: {conns}) — close the duplicate Figma window, "
-                      f"target cannot be resolved safely")
+                      f"(conns: {conns}) — different documents sharing a name; "
+                      f"close one, target cannot be resolved safely")
     # 2. exact fileKey
     for cid, i in live:
         if i.get("fileKey") == target:
@@ -409,10 +468,20 @@ def _reply(entry, result) -> web.Response:
 
 
 def _files_payload():
-    return [
-        {"name": i.get("name"), "fileKey": i.get("fileKey"), "conn": cid[:8]}
-        for cid, i in _live_plugins()
-    ]
+    live = _live_plugins()
+    seen = {}
+    out = []
+    for cid, i in live:
+        key = (i.get("name"), i.get("docSig"))
+        entry = {"name": i.get("name"), "fileKey": i.get("fileKey"), "conn": cid[:8]}
+        if i.get("docSig") is not None and key in seen:
+            # Another tab/window on the same document. Harmless — flagged so the
+            # count in `files` is not read as "two different files".
+            entry["sameDocAs"] = seen[key]
+        else:
+            seen[key] = cid[:8]
+        out.append(entry)
+    return out
 
 
 async def status_handler(request: web.Request) -> web.Response:
