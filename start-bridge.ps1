@@ -30,7 +30,7 @@ if (-not (Test-Path $python)) {
     # instead of running anything, so treat it as "no Python".
     if ($cmd -and $cmd.Source -like "*\WindowsApps\*") { $cmd = $null }
     if (-not $cmd) {
-        Write-Error "No Python found. Install it from python.org (tick 'Add to PATH'), then: python -m venv venv; .\venv\Scripts\pip install aiohttp"
+        Write-Error "No Python found. Install it from python.org (tick 'Add to PATH'), then: python -m venv venv; .\venv\Scripts\pip install -r requirements.txt"
     }
     $python = $cmd.Source
     Write-Host "venv not found, using $python" -ForegroundColor Yellow

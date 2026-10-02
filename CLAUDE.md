@@ -103,7 +103,9 @@ two agents meant to change the same node. Overlapping writers = last write wins,
 **ownership of mains / variants / variables — not by frame or screen**: a main-component or variable edit
 propagates file-wide, into frames the other writer has already verified.
 
-If the bridge isn't running: `bash start-bridge.sh` (runs in tmux `figmosha-bridge`; logs at `/tmp/figmosha-bridge.log`).
+If the bridge isn't running: `bash start-bridge.sh` on macOS / Linux / WSL (tmux `figmosha-bridge`,
+log `/tmp/figmosha-bridge.log`), or `.\start-bridge.ps1` on native Windows (log `bridge.out.log`).
+See [Running the bridge](#running-the-bridge).
 
 If the plugin isn't connected: tell the user — `Plugins → Development → Figmosha Bridge → Run`.
 
@@ -265,7 +267,7 @@ return root.findAll(n => n.type === "TEXT").map(t => t.characters)
 
 - **`plugin not connected` (503)**: plugin window closed in Figma. Ask user to Run it again.
 - **Timeout (504)**: probably infinite loop or unresolved `await`. Ask user to close & re-run plugin.
-- **`teamlibrary permission not specified`** (or similar): manifest needs a new permission. Edit `~/figmosha2/plugin/manifest.json` in place (that is the file Figma loads — no copy step), then ask the user to **re-import** the plugin (Plugins → Development → Manage plugins → remove + Import again).
+- **`teamlibrary permission not specified`** (or similar): manifest needs a new permission. Edit `plugin/manifest.json` in place (that is the file Figma loads, unless `CLAUDE.local.md` says it is copied elsewhere), then ask the user to **re-import** the plugin (Plugins → Development → Manage plugins → remove + Import again).
 - **Result looks weird / undefined**: you forgot `return`. The wrapper expects a value.
 - **Switch Figma tab → the plugin keeps running.** Each tab holds its own bridge connection, and a
   background tab still answers `exec` — **tabs in one window work; separate windows are not required**
@@ -275,30 +277,48 @@ return root.findAll(n => n.type === "TEXT").map(t => t.characters)
 
 The error response includes a `hint` field for common cases — read it before debugging.
 
-## Where things live (macOS, verified 2026-08-10)
+## Running the bridge
 
-Everything is **local to this Mac** — bridge, plugin and Figma Desktop are all on the same machine.
-There is no WSL host, no Windows copy, and no ssh/rsync step. *(This section previously described a
-WSL Ubuntu box at `192.168.31.105` with a `C:\Users\User\figmosha-plugin\` copy — obsolete, removed.)*
+Setup, once: `python -m venv venv`, then `pip install -r requirements.txt` with the venv's pip
+(`./venv/bin/pip` on macOS / Linux / WSL, `.\venv\Scripts\pip` on Windows). Tests need
+`requirements-dev.txt`.
 
-- Bridge: `~/figmosha2/bridge.py`, run by `./venv/bin/python` inside a detached tmux session
-  `figmosha-bridge` (see `start-bridge.sh`)
-- Log: `/tmp/figmosha-bridge.log`
-- Plugin source **= what Figma loads**: `~/figmosha2/plugin/{manifest.json,code.js,ui.html}`.
-  Figma Desktop references those exact paths (`~/Library/Application Support/Figma/settings.json` →
-  `localFileExtensions`, plugin id `figmosha-…`), so an edit here is live after a re-Run — **no copy step**.
-- Auto-start: a session-start hook that runs
-  `curl -sf localhost:8787/status || bash ~/figmosha2/start-bridge.sh` keeps the bridge normally already
-  up. The plugin itself must still be started by hand **once per open file (tab or window — either
-  works)**; `⌘⌥P` re-runs it in the tab you are on.
+**macOS / Linux / WSL**
 
 ```bash
-bash ~/figmosha2/start-bridge.sh     # start or restart (kills the old tmux session first)
+bash start-bridge.sh                 # start or restart (kills the old tmux session first)
 tmux attach -t figmosha-bridge       # watch it
 tmux kill-session -t figmosha-bridge # stop it
+# log: /tmp/figmosha-bridge.log
 ```
+
+**Native Windows** — no bash or tmux needed:
+
+```powershell
+.\start-bridge.ps1            # start, detached (no-op if already running)
+.\start-bridge.ps1 -Restart   # after editing bridge.py
+.\start-bridge.ps1 -Stop
+# logs: bridge.out.log, bridge.err.log next to the script
+```
+
+Windows gotchas, all hit in practice:
+
+- If PowerShell says *running scripts is disabled*, run it as
+  `powershell -ExecutionPolicy Bypass -File .\start-bridge.ps1`.
+- `start-bridge.ps1` must stay **pure ASCII** — Windows PowerShell 5.1 reads a BOM-less script as ANSI,
+  and one em dash or arrow breaks parsing of the whole file.
+- `python` resolving to `...\WindowsApps\python.exe` is the Microsoft Store stub, not Python.
+- In Windows PowerShell `curl` is `Invoke-WebRequest`; use `curl.exe` or `python figmosha.py`.
+
+**Where Figma loads the plugin from.** Import `plugin/manifest.json` straight from the repo, and Figma
+reads `plugin/` in place — an edit is live after a re-Run, with **no copy step**. The exception is a
+bridge inside WSL: Figma needs a Windows path, so `plugin/` is copied out (README → Install → WSL2).
+Record anything machine-specific (paths, copies, hooks) in `CLAUDE.local.md`.
+
+The plugin must be started by hand **once per open file (tab or window — either works)**; `⌘⌥P`
+(`Ctrl+Alt+P` on Windows) re-runs the last plugin in the tab you are on.
 
 After editing `plugin/code.js` or `plugin/ui.html`: ask the user to re-Run the plugin
 (Plugins → Development → Figmosha Bridge). After editing `plugin/manifest.json` (e.g. adding a
 permission): ask them to **re-import** it (Plugins → Development → Manage plugins → remove, then
-Import from `~/figmosha2/plugin/manifest.json`).
+Import from `plugin/manifest.json`).

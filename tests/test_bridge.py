@@ -4,7 +4,7 @@ Everything here runs without Figma: a small asyncio client plays the plugin's
 part, which is enough to exercise the parts most likely to regress — the shared
 PENDING / PLUGIN_WS state, the slot handover, and the origin/host guard.
 
-    pip install pytest aiohttp
+    pip install -r requirements-dev.txt
     pytest -q
 """
 

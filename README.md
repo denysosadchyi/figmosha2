@@ -259,10 +259,11 @@ Ask Claude for the smoke test and it will confirm the round trip works end to en
 git clone https://github.com/denysosadchyi/figmosha2.git
 cd figmosha2
 
-python3 -m venv venv && ./venv/bin/pip install aiohttp   # macOS / Linux / WSL
-python  -m venv venv && .\venv\Scripts\pip install aiohttp   # Windows
+python3 -m venv venv && ./venv/bin/pip install -r requirements.txt     # macOS / Linux / WSL
+python  -m venv venv && .\venv\Scripts\pip install -r requirements.txt  # Windows
 
 bash start-bridge.sh        # detached tmux session "figmosha-bridge"
+.\start-bridge.ps1          # native Windows, detached
 ./venv/bin/python bridge.py # …or just keep a terminal open
 ```
 
@@ -459,7 +460,7 @@ To add an error hint:
 No Figma needed — a fake plugin drives the bridge over a real WebSocket:
 
 ```bash
-pip install pytest aiohttp
+pip install -r requirements-dev.txt
 pytest -q            # bridge: guard, exec round trip, timeouts, slot handover
 node tests/helpers.test.js   # pure helpers: hex maths, auto-layout ordering
 ```

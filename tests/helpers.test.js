@@ -32,6 +32,8 @@ const figma = {
   ui: { onmessage: null, postMessage() {} },
   createFrame: makeFrame,
   currentPage: { selection: [] },
+  // code.js posts the file's identity as soon as it loads.
+  root: { name: "Test file", children: [{ id: "0:1" }] },
   variables: {},
 };
 

@@ -43,6 +43,19 @@ code it started with, so new helpers won't exist until you do. If
   Python" instead of launching it.
 - The bridge forces UTF-8 on its output, so a Cyrillic, CJK or emoji file name
   can't raise `UnicodeEncodeError` when the log is redirected on Windows.
+- On Windows every closed Figma tab left a `ConnectionResetError [WinError
+  10054]` traceback in `bridge.err.log`. It was asyncio noise after the
+  disconnect was already handled, and the bridge now drops it.
+- `CLAUDE.md` told Claude to start the bridge with bash and tmux and described
+  one maintainer's Mac. It now covers macOS / Linux / WSL and native Windows,
+  with machine specifics left to `CLAUDE.local.md`.
+- `tests/helpers.test.js` crashed before running a single check: `code.js`
+  now reads `figma.root.name` on load and the test's Figma stub had no `root`.
+
+### Added
+
+- `requirements.txt` (runtime) and `requirements-dev.txt` (adds `pytest`), so
+  setup is one `pip install -r` instead of package names spread across the docs.
 
 ## [2.2.0] — 2026-08-28
 

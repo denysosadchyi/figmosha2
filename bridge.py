@@ -613,7 +613,21 @@ def main():
           f"-H 'Content-Type: application/json' "
           f"-d '{{\"code\":\"return figma.currentPage.name\"}}'")
 
-    web.run_app(build_app(), host=args.host, port=args.port, print=None)
+    loop = asyncio.new_event_loop()
+    loop.set_exception_handler(_quiet_connection_resets)
+    web.run_app(build_app(), host=args.host, port=args.port, print=None, loop=loop)
+
+
+def _quiet_connection_resets(loop, context):
+    """Drop the Proactor traceback Windows logs when a Figma tab closes its socket.
+
+    asyncio's Proactor loop reports WinError 10054 from inside its own transport
+    callback, after aiohttp has already handled the disconnect — so it is pure
+    noise, and it filled bridge.err.log with tracebacks on every closed tab.
+    """
+    if isinstance(context.get("exception"), ConnectionResetError):
+        return
+    loop.default_exception_handler(context)
 
 
 if __name__ == "__main__":
