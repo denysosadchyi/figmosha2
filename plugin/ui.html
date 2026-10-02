@@ -161,6 +161,9 @@ function connect() {
   }
 
   ws.onopen = () => {
+    // A new bridge may have different code on disk; it re-sends `outdated` at
+    // hello time if this build is still behind.
+    outdated = false;
     setStatus(identity.name || "connected", "ok");
     log("[ws] connected" + (identity.name ? ` as ${identity.name}` : ""));
     sendHello();
