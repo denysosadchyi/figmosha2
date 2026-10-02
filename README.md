@@ -35,33 +35,30 @@ The Figma Plugin API is the most stable and powerful interface Figma offers. Tho
 Figmosha 2.0 keeps a plugin permanently open in Figma and exposes its Plugin API through a local network socket. You write code in your editor / Claude / a script, it runs inside Figma, and the result comes back to you.
 
 ```mermaid
-flowchart TB
-    subgraph client["PowerShell · curl · Claude Code"]
-        CLI["figmosha.py<br/>or any HTTP client"]
+flowchart LR
+    CLI["<b>figmosha.py</b><br/>curl · Claude Code<br/>any HTTP client"]
+
+    BRIDGE["<b>bridge.py</b><br/>127.0.0.1:8787<br/>routes by <code>-T</code><br/>one lock per file"]
+
+    subgraph figma["Figma Desktop"]
+        P1["<b>Figmosha Bridge</b><br/>File A"]
+        P2["<b>Figmosha Bridge</b><br/>File B"]
     end
 
-    subgraph bridge["bridge.py — 127.0.0.1:8787"]
-        HTTP["HTTP server<br/>/exec · /status"]
-        WSS["WS server<br/>/plugin"]
-    end
+    CLI <== "POST /exec { code }<br/>→ { ok, result, logs }" ==> BRIDGE
+    BRIDGE <-- "WebSocket" --> P1
+    BRIDGE <-- "WebSocket" --> P2
 
-    subgraph figma["Figma Desktop — open file"]
-        PLUGIN["Figmosha Bridge<br/>(plugin)"]
-        API["Figma Plugin API"]
-    end
-
-    CLI -- "POST /exec<br/>{ code }" --> HTTP
-    HTTP --> WSS
-    WSS -- "ws://localhost" --> PLUGIN
-    PLUGIN --> API
-
-    API -.-> PLUGIN
-    PLUGIN -. "result · logs" .-> WSS
-    WSS -.-> HTTP
-    HTTP -. "{ ok, result, value,<br/>logs, elapsed_ms, hint? }" .-> CLI
+    classDef client fill:#1e1e1e,stroke:#1e1e1e,color:#ffffff
+    classDef bridge fill:#0fa958,stroke:#0b8a48,color:#ffffff
+    classDef plugin fill:#ffffff,stroke:#0fa958,stroke-width:2px,color:#1e1e1e
+    class CLI client
+    class BRIDGE bridge
+    class P1,P2 plugin
+    style figma fill:#f5f5f5,stroke:#d0d0d0,color:#555555
 ```
 
-Solid arrows carry the request, dotted ones the response.
+Each arrow carries a request out and its result back. Every open file running the plugin gets its own connection.
 
 ## Highlights
 
