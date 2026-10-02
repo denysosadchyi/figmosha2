@@ -6,7 +6,27 @@ No clipboard hacks. No screenshots.
 
 Fast enough to feel synchronous: reads ~5 ms, mutations ~30 ms, library component import ~150 ms.
 
-<img width="1139" height="875" alt="image" src="https://github.com/user-attachments/assets/9aafc38c-39b8-4657-a7b6-c6fc94ea0805" />
+<img width="969" height="711" alt="The Figmosha Bridge plugin in Figma: a green bar with the file name and a 2/2 pill" src="docs/plugin-bar.png" />
+
+## What's new
+
+- **Several Figma files at once.** Run the plugin in every file you want to
+  drive; each one gets its own connection and you pick it with `-T "<file name>"`.
+  `figmosha targets` lists what's connected. With one file open nothing changes.
+- **Safe for several callers.** Scripts on the same file run one after another
+  instead of interleaving; scripts on different files don't wait on each other.
+  Read-only scripts can skip the queue with `--parallel`.
+- **Timeouts don't corrupt files.** A script that outlives its timeout blocks
+  further writes to that file until it finishes (or `figmosha clear -T <file>`),
+  and long sweeps can stop themselves with `h.ck()`.
+- **The same file in several tabs works**, instead of the tabs kicking each
+  other off the bridge.
+- **A plugin bar that tells you what's going on.** It shows the file's name, a
+  `2/2` pill when more than one file is connected, a spinner while a script runs,
+  and turns red for a moment when one fails.
+
+Full details in the [CHANGELOG](CHANGELOG.md) and
+[Multiple files & concurrency](#multiple-files--concurrency).
 
 ## Why this exists
 
