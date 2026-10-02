@@ -6,7 +6,7 @@ No clipboard hacks. No screenshots.
 
 Fast enough to feel synchronous: reads ~5 ms, mutations ~30 ms, library component import ~150 ms.
 
-<img width="1269" height="779" alt="The Figmosha Bridge plugin in Figma: a green bar with the file name and a 2/2 pill" src="docs/plugin-bar.png" />
+<img width="1269" height="779" alt="The Figmosha Bridge plugin in Figma: a green bar with the file name and a 2/2 pill" src="docs/plugin-bar-2026-10.png" />
 
 ## What's new
 
