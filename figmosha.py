@@ -113,6 +113,8 @@ def _emit(resp, raw=False):
 
     for line in resp.get("logs") or []:
         print(f"  log: {line}", file=sys.stderr)
+    if resp.get("notice"):
+        print(f"   ⚠ {resp['notice']}", file=sys.stderr)
 
     if resp.get("ok") is False:
         print(f"figmosha: {resp.get('error', 'unknown')}", file=sys.stderr)
@@ -188,12 +190,27 @@ def cmd_doctor(args):
              "a proxy is rewriting Host/Origin — talk to the bridge directly")
         return 1
     ok(f"bridge answering on {HOST}:{PORT}")
+    stale = False
+    if resp.get("bridge_outdated"):
+        stale = True
+        fail("bridge.py changed since the bridge started — it runs old code",
+             "restart it:  bash start-bridge.sh   (Windows: .\\start-bridge.ps1 -Restart)")
 
     if not resp.get("plugin_connected"):
         fail("plugin not connected",
              "in Figma Desktop: Plugins → Development → Figmosha Bridge")
         return 1
     ok("plugin connected")
+
+    current = resp.get("plugin_version")
+    for f in resp.get("files") or []:
+        if f.get("outdated"):
+            stale = True
+            fail(f"«{f.get('name')}» runs an older plugin build "
+                 f"({f.get('plugin') or 'unversioned'}, current {current})",
+                 "re-run it in that file: Plugins → Development → Figmosha Bridge")
+    if current and not stale:
+        ok(f"plugin build {current} everywhere")
 
     status, r = _exec("return 1 + 1;", 10)
     if status == 409 and r.get("abandoned"):
@@ -222,7 +239,7 @@ def cmd_doctor(args):
            f"of {v.get('pages')}")
         print("\n  The plugin is bound to whichever file was open when you ran it.")
         print("  Switched files? Run the plugin again in the new one.")
-    return 0
+    return 1 if stale else 0
 
 
 def cmd_exec(args):

@@ -322,7 +322,15 @@ Record anything machine-specific (paths, copies, hooks) in `CLAUDE.local.md`.
 The plugin must be started by hand **once per open file (tab or window — either works)**; `⌘⌥P`
 (`Ctrl+Alt+P` on Windows) re-runs the last plugin in the tab you are on.
 
-After editing `plugin/code.js` or `plugin/ui.html`: ask the user to re-Run the plugin
-(Plugins → Development → Figmosha Bridge). After editing `plugin/manifest.json` (e.g. adding a
+After editing `plugin/code.js` or `plugin/ui.html`: **bump `PLUGIN_VERSION`** at the top of
+`plugin/code.js` (date + counter, e.g. `2026-10-02.2`) and run `pytest tests/test_plugin_version.py` — it
+prints the line to add to `tests/plugin_fingerprint.json`, and fails if you forget the bump. Then ask the
+user to re-Run the plugin (Plugins → Development → Figmosha Bridge).
+
+**Stale code is reported, so act on it.** The bridge compares each plugin's build with `plugin/code.js`
+on disk and its own `bridge.py` with the one it started from. When either is stale, every `/exec` reply
+carries a `notice` (the CLI prints it as `⚠`), `/status` flags the file with `outdated: true`, the
+plugin bar turns purple with "New version: re-run plugin", and `figmosha doctor` names the fix. Tell
+the user — don't keep working against old code. After editing `plugin/manifest.json` (e.g. adding a
 permission): ask them to **re-import** it (Plugins → Development → Manage plugins → remove, then
 Import from `plugin/manifest.json`).

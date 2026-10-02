@@ -1,5 +1,11 @@
 figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 
+// Build id of this plugin code. The bridge compares it with plugin/code.js on
+// disk and asks for a re-Run when they differ, because a running plugin keeps
+// the code it started with. Bump it on every change to plugin/ —
+// tests/test_plugin_version.py fails until you do.
+const PLUGIN_VERSION = "2026-10-02.1";
+
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
 function postIdentity() {
@@ -10,6 +16,7 @@ function postIdentity() {
     fileKey: fileKey,
     name: figma.root.name,
     docSig: docSignature(),
+    pluginVersion: PLUGIN_VERSION,
   });
 }
 

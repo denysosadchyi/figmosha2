@@ -72,6 +72,15 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Added
 
+- **Figmosha asks you to update a stale plugin.** `plugin/code.js` carries a
+  `PLUGIN_VERSION` build id that the plugin reports on connect. When it differs
+  from the file on disk — after a `git pull`, say — the plugin bar turns purple
+  with "New version: re-run plugin", `/status` marks the file `outdated`, every
+  `/exec` reply carries a `notice`, and `figmosha doctor` says which file to
+  re-run. The bridge also notices when `bridge.py` changed since it started and
+  asks for a restart. `tests/test_plugin_version.py` fails if `plugin/` changes
+  without a version bump. Plugins from before this release report no build id
+  and count as outdated.
 - **Codex and other agents can set Figmosha up.** The agent instructions moved
   from `CLAUDE.md` to `AGENTS.md`, the file Codex reads; `CLAUDE.md` is now one
   line, `@AGENTS.md`, so Claude Code loads the same text and there is nothing to

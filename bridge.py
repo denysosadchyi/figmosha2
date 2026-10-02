@@ -18,10 +18,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
+import re
 import sys
 import time
 import uuid
+from pathlib import Path
+
 from aiohttp import web, WSMsgType
 
 
@@ -35,6 +39,48 @@ ABANDONED: dict = {}      # rid -> {"conn", "t0", "timeout"} — timed out, may 
 # address. Empty set means "don't check" — chosen when the user binds a
 # non-loopback address on purpose (--host 0.0.0.0).
 ALLOWED_HOSTS: set = set()
+
+# ─── version checks ───────────────────────────────────────────────────────
+# A running plugin keeps the code it started with, and a running bridge keeps
+# the bridge.py it started with. After a `git pull` both can be stale without
+# any sign of it, so compare what is running against what is on disk.
+
+HERE = Path(__file__).resolve().parent
+PLUGIN_CODE = HERE / "plugin" / "code.js"
+_VERSION_RE = re.compile(r'PLUGIN_VERSION\s*=\s*"([^"]+)"')
+
+
+def _file_digest(path: Path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+BRIDGE_DIGEST = _file_digest(Path(__file__).resolve())
+
+
+def expected_plugin_version():
+    """PLUGIN_VERSION as written in plugin/code.js right now, or None."""
+    try:
+        m = _VERSION_RE.search(PLUGIN_CODE.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    return m.group(1) if m else None
+
+
+def plugin_outdated(info) -> bool:
+    """True when this connection runs older plugin code than plugin/code.js.
+
+    A plugin from before version reporting sends nothing — that is outdated too.
+    """
+    expected = expected_plugin_version()
+    return expected is not None and info.get("pluginVersion") != expected
+
+
+def bridge_outdated() -> bool:
+    """True when bridge.py on disk differs from the one this process loaded."""
+    return _file_digest(Path(__file__).resolve()) != BRIDGE_DIGEST
 
 
 def _lock_for(conn_id):
@@ -249,8 +295,20 @@ async def plugin_ws_handler(request: web.Request):
                 PLUGINS[conn_id]["name"] = name
                 PLUGINS[conn_id]["docSig"] = doc_sig
                 PLUGINS[conn_id]["hello"] = True
+                PLUGINS[conn_id]["pluginVersion"] = m.get("plugin")
                 print(f"[plugin] hello v{m.get('version', '?')} "
-                      f"file={name!r} key={file_key} sig={doc_sig}")
+                      f"file={name!r} key={file_key} sig={doc_sig} "
+                      f"plugin={m.get('plugin')}")
+                if plugin_outdated(PLUGINS[conn_id]):
+                    # The plugin bar turns purple and asks for a re-Run.
+                    try:
+                        await ws.send_str(json.dumps({
+                            "type": "outdated",
+                            "running": m.get("plugin"),
+                            "expected": expected_plugin_version(),
+                        }))
+                    except Exception:
+                        pass
                 await _broadcast_peers()
                 continue
             if mtype == "pong":
@@ -465,25 +523,44 @@ def _reply(entry, result) -> web.Response:
 
     if result.get("type") == "error":
         error_text = result.get("text", "unknown error")
-        return web.json_response(
-            {
-                "ok": False,
-                "error": error_text,
-                "hint": find_hint(error_text),
-                "stack": result.get("stack"),
-                "logs": entry["logs"],
-                "elapsed_ms": elapsed_ms,
-            },
-            status=500,
-        )
+        body = {
+            "ok": False,
+            "error": error_text,
+            "hint": find_hint(error_text),
+            "stack": result.get("stack"),
+            "logs": entry["logs"],
+            "elapsed_ms": elapsed_ms,
+        }
+        status = 500
+    else:
+        body = {
+            "ok": True,
+            "result": result.get("text", ""),
+            "value": result.get("value"),
+            "logs": entry["logs"],
+            "elapsed_ms": elapsed_ms,
+        }
+        status = 200
 
-    return web.json_response({
-        "ok": True,
-        "result": result.get("text", ""),
-        "value": result.get("value"),
-        "logs": entry["logs"],
-        "elapsed_ms": elapsed_ms,
-    })
+    # Agents read responses, not the plugin bar — so say it here too.
+    notice = _version_notice(PLUGINS.get(entry.get("conn")) or {})
+    if notice:
+        body["notice"] = notice
+    return web.json_response(body, status=status)
+
+
+def _version_notice(info):
+    """One line asking for a re-Run / restart when running code is stale."""
+    parts = []
+    if info and plugin_outdated(info):
+        parts.append(f"the plugin in «{info.get('name') or '?'}» runs an older build "
+                     f"({info.get('pluginVersion') or 'unversioned'}, current "
+                     f"{expected_plugin_version()}) — re-run it in Figma: "
+                     f"Plugins → Development → Figmosha Bridge")
+    if bridge_outdated():
+        parts.append("bridge.py changed since the bridge started — restart it "
+                     "(bash start-bridge.sh, or .\\start-bridge.ps1 -Restart)")
+    return "; ".join(parts) or None
 
 
 def _files_payload():
@@ -492,7 +569,8 @@ def _files_payload():
     out = []
     for cid, i in live:
         key = (i.get("name"), i.get("docSig"))
-        entry = {"name": i.get("name"), "fileKey": i.get("fileKey"), "conn": cid[:8]}
+        entry = {"name": i.get("name"), "fileKey": i.get("fileKey"), "conn": cid[:8],
+                 "plugin": i.get("pluginVersion"), "outdated": plugin_outdated(i)}
         if i.get("docSig") is not None and key in seen:
             # Another tab/window on the same document. Harmless — flagged so the
             # count in `files` is not read as "two different files".
@@ -511,6 +589,8 @@ async def status_handler(request: web.Request) -> web.Response:
     files = _files_payload()
     return web.json_response({
         "plugin_connected": len(files) > 0,
+        "plugin_version": expected_plugin_version(),
+        "bridge_outdated": bridge_outdated(),
         "files": files,
         "pending": len(PENDING),
         "abandoned": [

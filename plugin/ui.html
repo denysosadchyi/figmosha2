@@ -23,6 +23,9 @@
   body.ok      { background: #0fa958; }
   body.err     { background: #d32f2f; }
   body.pending { background: #e8a317; }
+  /* The bridge has newer plugin code on disk than this window is running. */
+  body.outdated { background: #7b61ff; }
+  body.multi.outdated #badge { color: #7b61ff; }
 
   #status { min-width: 0; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* With 2+ files connected the icon and "1/2" sit together in a white pill. */
@@ -68,13 +71,13 @@ const peersEl = document.getElementById("peers");
 let ws = null;
 let reconnectTimer = null;
 const recentLog = [];
-let identity = { fileKey: null, name: null, docSig: null };
+let identity = { fileKey: null, name: null, docSig: null, pluginVersion: null };
 
 function sendHello() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   try {
     ws.send(JSON.stringify({
-      type: "hello", version: "2.1",
+      type: "hello", version: "2.1", plugin: identity.pluginVersion,
       fileKey: identity.fileKey, name: identity.name, docSig: identity.docSig,
     }));
   } catch (e) {}
@@ -93,13 +96,20 @@ let state = "pending";
 const running = new Set();
 let busyHold = null;
 
+// Set when the bridge says plugin/code.js on disk is newer than this run.
+let outdated = false;
+let statusText = "Connecting…";
+
 function render() {
   const multi = state === "ok" && peers && peers.total > 1;
   const busy = state === "ok" && (running.size > 0 || busyHold !== null);
   const failed = state === "ok" && !busy && errorHold !== null;
+  const stale = state === "ok" && !busy && !failed && outdated;
   peersEl.textContent = multi ? `${peers.index}/${peers.total}` : "";
-  iconEl.innerHTML = ICONS[busy ? "pending" : failed ? "err" : state] || "";
-  document.body.className = (failed ? "err" : state) + (multi ? " multi" : "") + (busy ? " busy" : "");
+  statusEl.textContent = stale ? "New version: re-run plugin" : statusText;
+  iconEl.innerHTML = ICONS[busy || stale ? "pending" : failed ? "err" : state] || "";
+  document.body.className = (failed ? "err" : stale ? "ok outdated" : state)
+    + (multi ? " multi" : "") + (busy ? " busy" : "");
 }
 
 // A failed exec turns the bar red for 2s, then it goes back to normal.
@@ -129,7 +139,7 @@ function setPeers(p) {
 }
 
 function setStatus(text, cls) {
-  statusEl.textContent = text;
+  statusText = text;
   state = cls;
   if (cls !== "ok") { peers = null; running.clear(); }
   render();
@@ -175,6 +185,10 @@ function connect() {
     } else if (msg.type === "abort") {
       // The bridge gave up on this run; code.js marks it so h.ck() throws.
       parent.postMessage({ pluginMessage: { type: "abort", id: msg.id } }, "*");
+    } else if (msg.type === "outdated") {
+      outdated = true;
+      log(`[outdated] running ${msg.running}, bridge has ${msg.expected}`);
+      render();
     } else if (msg.type === "peers") {
       setPeers({ index: msg.index, total: msg.total });
     }
@@ -198,7 +212,8 @@ window.onmessage = (e) => {
   const m = e.data && e.data.pluginMessage;
   if (!m) return;
   if (m.type === "identity") {
-    identity = { fileKey: m.fileKey || null, name: m.name || null, docSig: m.docSig || null };
+    identity = { fileKey: m.fileKey || null, name: m.name || null, docSig: m.docSig || null,
+                 pluginVersion: m.pluginVersion || null };
     log(`[id] file=${identity.name}`);
     // Show which file this window is bound to, once the socket is up.
     if (ws && ws.readyState === WebSocket.OPEN && identity.name) setStatus(identity.name, "ok");

@@ -217,6 +217,40 @@ def test_timed_out_script_interlocks_the_file_until_it_finishes():
     run(go())
 
 
+def test_outdated_plugin_is_told_to_rerun():
+    """A plugin running an older build than plugin/code.js gets an `outdated`
+    message (the bar asks for a re-Run), /status flags it, and every exec reply
+    carries a notice so an agent sees it too. A current build gets none."""
+    async def go():
+        c = await make_client()
+        current = bridge.expected_plugin_version()
+        assert current, "plugin/code.js should declare PLUGIN_VERSION"
+        async with FakePlugin(c) as old, FakePlugin(c) as new:
+            # FakePlugin's own hello carries no build id, which is outdated too.
+            old.received.clear()
+            new.received.clear()
+            await old.ws.send_str(json.dumps(
+                {"type": "hello", "name": "Old", "plugin": "2000-01-01.1"}))
+            await new.ws.send_str(json.dumps(
+                {"type": "hello", "name": "New", "plugin": current}))
+            await asyncio.sleep(0.1)
+
+            assert any(m["type"] == "outdated" and m["expected"] == current
+                       for m in old.received)
+            assert not any(m["type"] == "outdated" for m in new.received)
+
+            files = {f["name"]: f for f in (await (await c.get("/status")).json())["files"]}
+            assert files["Old"]["outdated"] is True
+            assert files["New"]["outdated"] is False
+
+            r = await c.post("/exec", json={"code": "return 1", "target": "Old"})
+            assert "re-run" in (await r.json())["notice"]
+            r = await c.post("/exec", json={"code": "return 1", "target": "New"})
+            assert "notice" not in await r.json()
+        await c.close()
+    run(go())
+
+
 def test_peers_counts_only_files_that_said_hello():
     """The plugin bar's "1/2" pill: each identified connection learns its index
     and the total; a socket that has not sent `hello` yet is not a file."""

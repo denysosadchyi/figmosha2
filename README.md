@@ -129,8 +129,8 @@ authentication beyond being on the machine.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /exec` | `{code, timeout?, target?, parallel?}` | `{ok, result, value, logs, elapsed_ms}` |
-| `GET /status` | — | `{plugin_connected, files, pending, abandoned}` |
+| `POST /exec` | `{code, timeout?, target?, parallel?}` | `{ok, result, value, logs, elapsed_ms, notice?}` — `notice` when the plugin or bridge runs stale code |
+| `GET /status` | — | `{plugin_connected, plugin_version, bridge_outdated, files, pending, abandoned}` — each file has `plugin` and `outdated` |
 | `GET /targets` | — | `{files: [{name, fileKey, conn}]}` — connected Figma files |
 | `POST /clear` | `{target?, force?}` | drops a file's abandoned-script interlock |
 | `GET /` | — | service banner listing the endpoints |
