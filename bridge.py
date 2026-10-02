@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import sys
 import time
 import uuid
 from aiohttp import web, WSMsgType
@@ -579,6 +580,15 @@ def build_app() -> web.Application:
 
 def main():
     global ALLOWED_HOSTS
+
+    # File names are routinely Cyrillic, CJK or emoji. With stdout redirected to
+    # a log on Windows, Python falls back to the ANSI code page and a `hello`
+    # print would raise UnicodeEncodeError inside the plugin handler.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
 
     ap = argparse.ArgumentParser(description="Figmosha 2.0 bridge server")
     ap.add_argument("--host", default="127.0.0.1", help="bind host (default 127.0.0.1)")

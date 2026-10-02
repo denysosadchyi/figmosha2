@@ -413,6 +413,9 @@ chain and tells you which link is broken.
 | `Cannot assign to read only property` | `node.fills` is frozen | Use `await h.bF(node, idx, varId)` or copy: `JSON.parse(JSON.stringify(node.fills))` |
 | `pip install aiohttp` fails on Linux | Python externally-managed environment (PEP 668) | Use the venv approach (always preferred) or `pip install --user --break-system-packages aiohttp` |
 | Tmux not installed (Windows native) | `start-bridge.sh` needs bash + tmux | Use `.\start-bridge.ps1` — same thing, detached, with `-Restart` and `-Stop` |
+| `start-bridge.ps1 cannot be loaded because running scripts is disabled` | Windows PowerShell's default execution policy | `powershell -ExecutionPolicy Bypass -File .\start-bridge.ps1`, or once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+| `python` opens the Microsoft Store | `WindowsApps\python.exe` is a Store stub, not Python | Install from python.org with **Add to PATH** ticked, or turn the stub off in Settings → Apps → App execution aliases |
+| `curl ... -d '{"code":...}'` fails in Windows PowerShell | `curl` there is an alias for `Invoke-WebRequest` | Call `curl.exe` explicitly, or just use `python figmosha.py` |
 | `403 cross-origin requests are not allowed` | Something is adding an `Origin` header | Talk to the bridge directly, not through a proxy or a browser |
 | `409 ... different documents sharing a name` | Two distinct files are open under the same `figma.root.name` | Close one — the bridge won't guess which you meant |
 | A tab stopped answering `exec` | Its socket dropped (laptop slept, bridge restarted) | Re-Run the plugin in that tab (`⌘⌥P`); it re-registers by file name |

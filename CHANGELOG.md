@@ -28,6 +28,21 @@ code it started with, so new helpers won't exist until you do. If
 ### Fixed
 
 - Descenders in the plugin bar's text were clipped at the bottom.
+- **`start-bridge.ps1` did not run in Windows PowerShell 5.1**, the one Windows
+  ships with. The file had em dashes and arrows but no BOM, so 5.1 read it as
+  ANSI and failed with "The string is missing the terminator". It is now pure
+  ASCII.
+- **The bridge did not start from a folder with a space in its path**
+  (`can't open file 'F:\\00'`). PS 5.1's `Start-Process` doesn't quote
+  `-ArgumentList` array elements; the arguments are now one pre-quoted string.
+- `start-bridge.ps1` found the running bridge by grepping `netstat` for
+  `LISTENING`, which is translated on non-English Windows, so `-Stop` and the
+  already-running check silently did nothing there. It now asks
+  `Get-NetTCPConnection`.
+- `start-bridge.ps1` treats the Microsoft Store `python.exe` stub as "no
+  Python" instead of launching it.
+- The bridge forces UTF-8 on its output, so a Cyrillic, CJK or emoji file name
+  can't raise `UnicodeEncodeError` when the log is redirected on Windows.
 
 ## [2.2.0] — 2026-08-28
 

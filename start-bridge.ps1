@@ -8,6 +8,9 @@
 #   .\start-bridge.ps1 -Stop      # just stop
 #
 # Logs go to bridge.out.log next to this script.
+#
+# Keep this file pure ASCII: Windows PowerShell 5.1 reads a BOM-less script as
+# ANSI, so a single em dash or arrow breaks parsing of the whole file.
 
 param(
     [int]$Port = 8787,
@@ -23,15 +26,23 @@ $log = Join-Path $root "bridge.out.log"
 $python = Join-Path $root "venv\Scripts\python.exe"
 if (-not (Test-Path $python)) {
     $cmd = Get-Command python -ErrorAction SilentlyContinue
+    # WindowsApps\python.exe is the Microsoft Store stub: it opens the Store
+    # instead of running anything, so treat it as "no Python".
+    if ($cmd -and $cmd.Source -like "*\WindowsApps\*") { $cmd = $null }
     if (-not $cmd) {
-        Write-Error "No Python found. Create the venv first: python -m venv venv; .\venv\Scripts\pip install aiohttp"
+        Write-Error "No Python found. Install it from python.org (tick 'Add to PATH'), then: python -m venv venv; .\venv\Scripts\pip install aiohttp"
     }
     $python = $cmd.Source
     Write-Host "venv not found, using $python" -ForegroundColor Yellow
 }
 
 function Get-BridgePid {
-    $line = netstat -ano | Select-String ":$Port\s" | Select-String "LISTENING" | Select-Object -First 1
+    # Get-NetTCPConnection reports the state as an enum, so it works on any
+    # Windows display language; netstat prints "LISTENING" translated.
+    $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($conn) { return $conn.OwningProcess }
+    $line = netstat -ano | Select-String ":$Port\s.*\s0\.0\.0\.0:0\s|:$Port\s.*\s\[::\]:0\s" | Select-Object -First 1
     if (-not $line) { return $null }
     return ($line.ToString() -split '\s+' | Where-Object { $_ } | Select-Object -Last 1)
 }
@@ -44,7 +55,7 @@ function Stop-Bridge {
         Write-Host "stopped pid $existing" -ForegroundColor Green
         Start-Sleep -Milliseconds 600
     } catch {
-        Write-Error "could not stop pid ${existing}: $($_.Exception.Message). It may be running as another user — try an elevated shell."
+        Write-Error "could not stop pid ${existing}: $($_.Exception.Message). It may be running as another user - try an elevated shell."
     }
 }
 
@@ -53,12 +64,14 @@ if ($Stop) { return }
 
 $existing = Get-BridgePid
 if ($existing) {
-    Write-Host "bridge already listening on $Port (pid $existing) — use -Restart to replace it" -ForegroundColor Yellow
+    Write-Host "bridge already listening on $Port (pid $existing) - use -Restart to replace it" -ForegroundColor Yellow
     return
 }
 
+# One pre-quoted string, not an array: PS 5.1 does not quote array elements,
+# so a path with a space ("F:\00 Projects\...") splits into two arguments.
 Start-Process -FilePath $python `
-    -ArgumentList @("-u", (Join-Path $root "bridge.py"), "--port", $Port) `
+    -ArgumentList "-u `"$(Join-Path $root 'bridge.py')`" --port $Port" `
     -WorkingDirectory $root `
     -RedirectStandardOutput $log `
     -RedirectStandardError (Join-Path $root "bridge.err.log") `
@@ -69,8 +82,8 @@ $now = Get-BridgePid
 if ($now) {
     Write-Host "bridge listening on http://127.0.0.1:$Port (pid $now)" -ForegroundColor Green
     Write-Host "log: $log"
-    Write-Host "now run the plugin: Figma → Plugins → Development → Figmosha Bridge"
+    Write-Host "now run the plugin: Figma > Plugins > Development > Figmosha Bridge"
 } else {
-    Write-Host "bridge did not come up — check $log and bridge.err.log" -ForegroundColor Red
+    Write-Host "bridge did not come up - check $log and bridge.err.log" -ForegroundColor Red
     if (Test-Path $log) { Get-Content $log -Tail 20 }
 }
