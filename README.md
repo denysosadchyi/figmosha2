@@ -36,26 +36,26 @@ Figmosha 2.0 keeps a plugin permanently open in Figma and exposes its Plugin API
 
 ```mermaid
 flowchart LR
-    CLI["<b>figmosha.py</b><br/>curl · Claude Code<br/>any HTTP client"]
+    CLI("<b>figmosha.py</b><br/>curl · Claude Code<br/>any HTTP client")
 
-    BRIDGE["<b>bridge.py</b><br/>127.0.0.1:8787<br/>routes by <code>-T</code><br/>one lock per file"]
+    BRIDGE("<b>bridge.py</b><br/>127.0.0.1:8787<br/>routes by <code>-T</code><br/>one lock per file")
 
     subgraph figma["Figma Desktop"]
-        P1["<b>Figmosha Bridge</b><br/>File A"]
-        P2["<b>Figmosha Bridge</b><br/>File B"]
+        P1("<b>Figmosha Bridge</b><br/>File A")
+        P2("<b>Figmosha Bridge</b><br/>File B")
     end
 
     CLI <== "POST /exec { code }<br/>→ { ok, result, logs }" ==> BRIDGE
     BRIDGE <-- "WebSocket" --> P1
     BRIDGE <-- "WebSocket" --> P2
 
-    classDef client fill:#1e1e1e,stroke:#1e1e1e,color:#ffffff
-    classDef bridge fill:#0fa958,stroke:#0b8a48,color:#ffffff
-    classDef plugin fill:#ffffff,stroke:#0fa958,stroke-width:2px,color:#1e1e1e
+    classDef client fill:#1e1e1e,stroke:#1e1e1e,color:#ffffff,rx:12,ry:12
+    classDef bridge fill:#0fa958,stroke:#0b8a48,color:#ffffff,rx:12,ry:12
+    classDef plugin fill:#ffffff,stroke:#0fa958,stroke-width:2px,color:#1e1e1e,rx:12,ry:12
     class CLI client
     class BRIDGE bridge
     class P1,P2 plugin
-    style figma fill:#f5f5f5,stroke:#d0d0d0,color:#555555
+    style figma fill:#f5f5f5,stroke:#d0d0d0,color:#555555,rx:16,ry:16
 ```
 
 Each arrow carries a request out and its result back. Every open file running the plugin gets its own connection.
