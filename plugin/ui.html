@@ -12,7 +12,7 @@
     justify-content: center;
     gap: 6px;
     padding: 0 8px;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: 600;
     line-height: 1;
     color: #fff;
@@ -24,6 +24,20 @@
   body.err     { background: #d32f2f; }
   body.pending { background: #e8a317; }
 
+  #status { min-width: 0; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* With 2+ files connected the icon and "1/2" sit together in a white pill. */
+  #badge { display: flex; align-items: center; gap: 3px; flex: none; }
+  body.multi #badge {
+    padding: 2px 5px 2px 2px; border-radius: 999px;
+    background: #fff; color: #0fa958;
+  }
+  body.multi #icon { font-size: 13px; }
+  #peers {
+    display: none;
+    font-size: 10px; font-weight: 700; line-height: 1.2;
+    font-variant-numeric: tabular-nums;
+  }
+  body.multi #peers { display: block; }
   #icon { display: flex; font-size: 16px; flex: none; }
   #icon svg { display: block; }
   body.pending #icon { animation: spin 1.1s linear infinite; }
@@ -31,7 +45,7 @@
 </style>
 </head>
 <body>
-  <span id="icon"></span>
+  <span id="badge"><span id="icon"></span><span id="peers"></span></span>
   <span id="status">Connecting…</span>
 
 <script>
@@ -46,6 +60,7 @@ const ICONS = {
 const SERVER = "ws://localhost:8787/plugin";
 const statusEl = document.getElementById("status");
 const iconEl = document.getElementById("icon");
+const peersEl = document.getElementById("peers");
 let ws = null;
 let reconnectTimer = null;
 const recentLog = [];
@@ -66,10 +81,28 @@ function log(line) {
   console.log("[figmosha] " + line);
 }
 
+// "1/2" — this window's slot among all plugin windows connected to the bridge.
+// Shown only when connected and there are 2+ of them; a lone file keeps the icon.
+let peers = null;
+let state = "pending";
+
+function render() {
+  const multi = state === "ok" && peers && peers.total > 1;
+  peersEl.textContent = multi ? `${peers.index}/${peers.total}` : "";
+  document.body.className = state + (multi ? " multi" : "");
+}
+
+function setPeers(p) {
+  peers = p;
+  render();
+}
+
 function setStatus(text, cls) {
   statusEl.textContent = text;
   iconEl.innerHTML = ICONS[cls] || "";
-  document.body.className = cls;
+  state = cls;
+  if (cls !== "ok") peers = null;
+  render();
 }
 
 function shortId(id) {
@@ -88,7 +121,7 @@ function connect() {
   }
 
   ws.onopen = () => {
-    setStatus("connected", "ok");
+    setStatus(identity.name || "connected", "ok");
     log("[ws] connected" + (identity.name ? ` as ${identity.name}` : ""));
     sendHello();
     // In case identity hasn't arrived from the plugin yet, ask for it.
@@ -108,6 +141,8 @@ function connect() {
       // Liveness probe: the bridge sends this when another plugin instance
       // wants the slot. Answering keeps ours.
       try { ws.send(JSON.stringify({ type: "pong" })); } catch (e) {}
+    } else if (msg.type === "peers") {
+      setPeers({ index: msg.index, total: msg.total });
     }
   };
 
@@ -131,6 +166,8 @@ window.onmessage = (e) => {
   if (m.type === "identity") {
     identity = { fileKey: m.fileKey || null, name: m.name || null, docSig: m.docSig || null };
     log(`[id] file=${identity.name}`);
+    // Show which file this window is bound to, once the socket is up.
+    if (ws && ws.readyState === WebSocket.OPEN && identity.name) setStatus(identity.name, "ok");
     sendHello();  // (re-)register this connection under the file name
     return;
   }

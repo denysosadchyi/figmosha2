@@ -138,7 +138,9 @@ curl -s -X POST http://localhost:8787/exec \
 The bridge holds **one connection per open Figma file** running the plugin, not
 one globally. Run the plugin in each file you want to drive; the plugin reports
 its identity (`figma.root.name`, `figma.fileKey` where available, and a document
-signature), and the bridge routes by it.
+signature), and the bridge routes by it. Each plugin bar shows its file's name,
+and with two or more files connected a `✓ 1/2` pill says which window this is
+and how many are open.
 
 ```bash
 python figmosha.py targets                          # name / fileKey / conn per file
@@ -229,7 +231,7 @@ It clones the repo, creates the venv, installs `aiohttp`, starts the bridge, and
 Two things Claude cannot do for you, because Figma exposes no API for either:
 
 1. **Import the plugin** — in Figma Desktop: **Plugins → Development → Import plugin from manifest…**, pick `plugin/manifest.json` from the repo. Once, ever.
-2. **Run the plugin** — **Plugins → Development → Figmosha Bridge**. A small green **Connected** bar appears; the bridge logs `[plugin] connected from 127.0.0.1`. You're live.
+2. **Run the plugin** — **Plugins → Development → Figmosha Bridge**. A small green bar with the file's name appears; the bridge logs `[plugin] connected from 127.0.0.1`. You're live.
 
 Ask Claude for the smoke test and it will confirm the round trip works end to end.
 
@@ -387,7 +389,7 @@ chain and tells you which link is broken.
 |---|---|---|
 | `connection refused` from CLI | Server not running | `bash start-bridge.sh`, or `.\start-bridge.ps1` on Windows |
 | `plugin not connected` (503) | Plugin window closed | Plugins → Development → Figmosha Bridge → Run |
-| Plugin says `disconnected, retrying…` | Server is down or restarting | Start it; plugin auto-reconnects within 2 s |
+| Plugin says `Reconnecting…` | Server is down or restarting | Start it; plugin auto-reconnects within 2 s |
 | 504 timeout | Code threw silently or `await` never resolved | Close the plugin (X), Run again. Increase `--timeout` for legitimately long ops |
 | `permission not specified in manifest` | API needs a permission not declared in `manifest.json` | Add to `permissions` array, sync to Windows path if applicable, **re-import** plugin |
 | `Cannot write to node with unloaded font` | Need to load fonts first | Use `await h.setText(...)` or wrap edits in `h.withFonts(root, fn)` |

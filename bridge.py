@@ -160,6 +160,17 @@ def _label(conn_id: str) -> str:
     return info.get("name") or f"({conn_id[:8]})"
 
 
+async def _broadcast_peers():
+    """Tell every connected plugin its position and the total, for the "1/2" badge."""
+    live = _live_plugins()
+    for idx, (_, info) in enumerate(live, 1):
+        try:
+            await info["ws"].send_str(json.dumps(
+                {"type": "peers", "index": idx, "total": len(live)}))
+        except Exception:
+            pass
+
+
 async def plugin_ws_handler(request: web.Request):
     # CSRF/rebinding guard (upstream): the plugin UI iframe reports Origin "null".
     blocked = _guard(request, allow_null_origin=True)
@@ -234,6 +245,7 @@ async def plugin_ws_handler(request: web.Request):
                 PLUGINS[conn_id]["docSig"] = doc_sig
                 print(f"[plugin] hello v{m.get('version', '?')} "
                       f"file={name!r} key={file_key} sig={doc_sig}")
+                await _broadcast_peers()
                 continue
             if mtype == "pong":
                 # Answer to a liveness probe: this slot is defended, so a new
@@ -276,6 +288,7 @@ async def plugin_ws_handler(request: web.Request):
         for rid, orphan in list(ABANDONED.items()):
             if orphan.get("conn") == conn_id:
                 ABANDONED.pop(rid, None)
+        await _broadcast_peers()
     return ws
 
 

@@ -8,6 +8,22 @@ After upgrading, **re-run the plugin in Figma** — a running plugin keeps the
 code it started with, so new helpers won't exist until you do. If
 `plugin/manifest.json` changed, re-*import* it rather than just re-running.
 
+## [Unreleased]
+
+### Changed
+
+- **The plugin bar names its file.** Once connected it shows the Figma file's
+  name instead of "connected", in a smaller font, cut with an ellipsis if long.
+- **The plugin bar counts open files.** With two or more plugin windows
+  connected, the check icon sits in a white pill with this window's position,
+  e.g. `✓ 1/2`. A single file shows just the icon. The bridge pushes a `peers`
+  message (`{index, total}`) to every plugin when one connects or leaves; older
+  plugin builds ignore it.
+
+### Fixed
+
+- Descenders in the plugin bar's text were clipped at the bottom.
+
 ## [2.2.0] — 2026-08-28
 
 ### Added
