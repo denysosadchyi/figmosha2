@@ -139,7 +139,7 @@ The bridge holds **one connection per open Figma file** running the plugin, not
 one globally. Run the plugin in each file you want to drive; the plugin reports
 its identity (`figma.root.name`, `figma.fileKey` where available, and a document
 signature), and the bridge routes by it. Each plugin bar shows its file's name,
-and with two or more files connected a `✓ 1/2` pill says which window this is
+and with two or more files connected a `1/2 ✓` pill says which window this is
 and how many are open.
 
 ```bash

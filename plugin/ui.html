@@ -9,10 +9,10 @@
     margin: 0;
     display: flex;
     align-items: center;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 6px;
     padding: 0 8px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     line-height: 1;
     color: #fff;
@@ -26,11 +26,14 @@
 
   #status { min-width: 0; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* With 2+ files connected the icon and "1/2" sit together in a white pill. */
-  #badge { display: flex; align-items: center; gap: 3px; flex: none; }
+  #fileicon { flex: none; width: 8px; height: 12px; display: block; }
+  /* Name on the left, icon / pill pushed to the right edge. */
+  #badge { display: flex; align-items: center; gap: 3px; flex: none; order: 2; margin-left: auto; }
   body.multi #badge {
-    padding: 2px 5px 2px 2px; border-radius: 999px;
+    padding: 2px 2px 2px 5px; border-radius: 999px;
     background: #fff; color: #0fa958;
   }
+  body.multi.err #badge { color: #d32f2f; }
   body.multi #icon { font-size: 13px; }
   #peers {
     display: none;
@@ -40,12 +43,13 @@
   body.multi #peers { display: block; }
   #icon { display: flex; font-size: 16px; flex: none; }
   #icon svg { display: block; }
-  body.pending #icon { animation: spin 1.1s linear infinite; }
+  body.pending #icon, body.busy #icon { animation: spin 1.1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
-  <span id="badge"><span id="icon"></span><span id="peers"></span></span>
+  <span id="badge"><span id="peers"></span><span id="icon"></span></span>
+  <svg id="fileicon" viewBox="0 0 16 24" aria-hidden="true"><path fill="currentColor" d="M4 .3h3.7v7.4H4A3.7 3.7 0 0 1 4 .3zM8.3.3H12a3.7 3.7 0 0 1 0 7.4H8.3zM4 8.3h3.7v7.4H4a3.7 3.7 0 0 1 0-7.4zM12 8.3a3.7 3.7 0 1 1 0 7.4 3.7 3.7 0 0 1 0-7.4zM4 16.3h3.7V20A3.7 3.7 0 1 1 4 16.3z"/></svg>
   <span id="status">Connecting…</span>
 
 <script>
@@ -85,11 +89,38 @@ function log(line) {
 // Shown only when connected and there are 2+ of them; a lone file keeps the icon.
 let peers = null;
 let state = "pending";
+// Exec ids currently running in this file — while any are, the check spins.
+const running = new Set();
+let busyHold = null;
 
 function render() {
   const multi = state === "ok" && peers && peers.total > 1;
+  const busy = state === "ok" && (running.size > 0 || busyHold !== null);
+  const failed = state === "ok" && !busy && errorHold !== null;
   peersEl.textContent = multi ? `${peers.index}/${peers.total}` : "";
-  document.body.className = state + (multi ? " multi" : "");
+  iconEl.innerHTML = ICONS[busy ? "pending" : failed ? "err" : state] || "";
+  document.body.className = (failed ? "err" : state) + (multi ? " multi" : "") + (busy ? " busy" : "");
+}
+
+// A failed exec turns the bar red for 2s, then it goes back to normal.
+let errorHold = null;
+function flashError() {
+  clearTimeout(errorHold);
+  errorHold = setTimeout(() => { errorHold = null; render(); }, 2000);
+  render();
+}
+
+function execStarted(id) {
+  running.add(id);
+  render();
+}
+
+// Keep the spinner up for at least 400ms so a 20ms exec still registers.
+function execFinished(id) {
+  running.delete(id);
+  clearTimeout(busyHold);
+  busyHold = setTimeout(() => { busyHold = null; render(); }, 400);
+  render();
 }
 
 function setPeers(p) {
@@ -99,9 +130,8 @@ function setPeers(p) {
 
 function setStatus(text, cls) {
   statusEl.textContent = text;
-  iconEl.innerHTML = ICONS[cls] || "";
   state = cls;
-  if (cls !== "ok") peers = null;
+  if (cls !== "ok") { peers = null; running.clear(); }
   render();
 }
 
@@ -136,6 +166,7 @@ function connect() {
     }
     if (msg.type === "exec") {
       log(`[exec] ${shortId(msg.id)} code=${(msg.code || "").length}b`);
+      execStarted(msg.id);
       parent.postMessage({ pluginMessage: { type: "exec", id: msg.id, code: msg.code } }, "*");
     } else if (msg.type === "ping") {
       // Liveness probe: the bridge sends this when another plugin instance
@@ -170,6 +201,10 @@ window.onmessage = (e) => {
     if (ws && ws.readyState === WebSocket.OPEN && identity.name) setStatus(identity.name, "ok");
     sendHello();  // (re-)register this connection under the file name
     return;
+  }
+  if (m.type === "result" || m.type === "error") {
+    if (m.type === "error") flashError();
+    execFinished(m.id);
   }
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     log(`[drop] ws not open, ${m.type} id=${shortId(m.id)}`);

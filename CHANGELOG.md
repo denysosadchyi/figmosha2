@@ -13,12 +13,17 @@ code it started with, so new helpers won't exist until you do. If
 ### Changed
 
 - **The plugin bar names its file.** Once connected it shows the Figma file's
-  name instead of "connected", in a smaller font, cut with an ellipsis if long.
+  name instead of "connected", cut with an ellipsis if long.
 - **The plugin bar counts open files.** With two or more plugin windows
   connected, the check icon sits in a white pill with this window's position,
-  e.g. `✓ 1/2`. A single file shows just the icon. The bridge pushes a `peers`
+  e.g. `1/2 ✓`. A single file shows just the icon. The bridge pushes a `peers`
   message (`{index, total}`) to every plugin when one connects or leaves; older
   plugin builds ignore it.
+- **The plugin bar shows what the file is doing.** The check spins while an
+  exec runs on that file (held at least 400ms so quick ones still show), and a
+  failed exec turns the bar red with a `!` for 2s.
+- **New plugin bar layout.** A Figma file icon and the name on the left, the
+  status icon or `1/2 ✓` pill on the right.
 
 ### Fixed
 
