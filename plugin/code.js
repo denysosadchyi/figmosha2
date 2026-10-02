@@ -4,7 +4,7 @@ figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 // disk and asks for a re-Run when they differ, because a running plugin keeps
 // the code it started with. Bump it on every change to plugin/ —
 // tests/test_plugin_version.py fails until you do.
-const PLUGIN_VERSION = "2026-10-02.2";
+const PLUGIN_VERSION = "2026-10-02.3";
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
@@ -361,6 +361,13 @@ const ABORTED = new Set();
 
 figma.ui.onmessage = async (msg) => {
   if (msg.type === "need-identity") { postIdentity(); return; }
+  if (msg.type === "open-url") {
+    // The Update button. Only ever the project's GitHub pages.
+    if (typeof msg.url === "string" && msg.url.startsWith("https://github.com/denysosadchyi/figmosha2")) {
+      figma.openExternal(msg.url);
+    }
+    return;
+  }
   if (msg.type === "abort") {
     if (msg.id) ABORTED.add(msg.id);
     return;

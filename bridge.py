@@ -20,12 +20,15 @@ import argparse
 import asyncio
 import hashlib
 import json
+import os
 import re
+import subprocess
 import sys
 import time
 import uuid
 from pathlib import Path
 
+import aiohttp
 from aiohttp import web, WSMsgType
 
 
@@ -81,6 +84,101 @@ def plugin_outdated(info) -> bool:
 def bridge_outdated() -> bool:
     """True when bridge.py on disk differs from the one this process loaded."""
     return _file_digest(Path(__file__).resolve()) != BRIDGE_DIGEST
+
+
+# ─── update check against GitHub ──────────────────────────────────────────
+# The checks above catch code that is older than this checkout. This one asks
+# whether the checkout itself is behind GitHub, so the plugin bar can offer an
+# Update button. It never blocks anything and stays silent on any failure.
+# Set FIGMOSHA_NO_UPDATE_CHECK=1 to turn it off.
+
+REPO = "denysosadchyi/figmosha2"
+BRANCH = "master"
+UPDATE_URL = f"https://github.com/{REPO}/blob/{BRANCH}/CHANGELOG.md"
+UPDATE_EVERY = 6 * 60 * 60   # seconds between checks
+UPDATE: dict | None = None   # {"behind": n, "url": ...} once GitHub has newer commits
+
+
+def _local_commit():
+    """HEAD of this checkout, or None (zip download, no git, detached oddity)."""
+    try:
+        out = subprocess.run(["git", "-C", str(HERE), "rev-parse", "HEAD"],
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    sha = out.stdout.strip()
+    return sha if out.returncode == 0 and len(sha) == 40 else None
+
+
+def commits_behind(compare: dict):
+    """How many commits GitHub has that this checkout lacks, from /compare.
+
+    The request is `compare/<local>...<branch>`, so GitHub describes the branch
+    relative to us: "ahead" / "diverged" with `ahead_by` = commits we lack.
+    """
+    if compare.get("status") in ("ahead", "diverged"):
+        return int(compare.get("ahead_by") or 0)
+    return 0
+
+
+async def check_for_update():
+    """Ask GitHub how far behind this checkout is; returns behind count or None."""
+    sha = await asyncio.get_running_loop().run_in_executor(None, _local_commit)
+    if not sha:
+        return None
+    url = f"https://api.github.com/repos/{REPO}/compare/{sha}...{BRANCH}"
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "figmosha-bridge"}
+    try:
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url, headers=headers) as r:
+                # 404: HEAD is a local commit GitHub has never seen — not our call.
+                if r.status != 200:
+                    return None
+                return commits_behind(await r.json())
+    except Exception:
+        return None
+
+
+async def set_update(behind):
+    """Record the result and tell every plugin when it changes."""
+    global UPDATE
+    new = {"behind": behind, "url": UPDATE_URL} if behind else None
+    if new == UPDATE:
+        return
+    UPDATE = new
+    if new:
+        print(f"[update] {behind} new commit(s) on GitHub — git pull to update")
+    for _, info in _live_plugins():
+        await _send_update(info["ws"])
+
+
+async def _send_update(ws):
+    if not UPDATE:
+        return
+    try:
+        await ws.send_str(json.dumps({"type": "update", **UPDATE}))
+    except Exception:
+        pass
+
+
+async def _update_loop(app):
+    await asyncio.sleep(5)  # let the plugins reconnect first
+    while True:
+        behind = await check_for_update()
+        if behind is not None:
+            await set_update(behind)
+        await asyncio.sleep(UPDATE_EVERY)
+
+
+async def _start_update_checks(app):
+    app["update_task"] = asyncio.get_running_loop().create_task(_update_loop(app))
+
+
+async def _stop_update_checks(app):
+    task = app.get("update_task")
+    if task:
+        task.cancel()
 
 
 def _lock_for(conn_id):
@@ -309,6 +407,7 @@ async def plugin_ws_handler(request: web.Request):
                         }))
                     except Exception:
                         pass
+                await _send_update(ws)
                 await _broadcast_peers()
                 continue
             if mtype == "pong":
@@ -557,6 +656,9 @@ def _version_notice(info):
                      f"({info.get('pluginVersion') or 'unversioned'}, current "
                      f"{expected_plugin_version()}) — re-run it in Figma: "
                      f"Plugins → Development → Figmosha Bridge")
+    if UPDATE:
+        parts.append(f"a newer Figmosha is on GitHub ({UPDATE['behind']} commit(s)) — "
+                     f"git pull, then restart the bridge and re-run the plugin")
     if bridge_outdated():
         parts.append("bridge.py changed since the bridge started — restart it "
                      "(bash start-bridge.sh, or .\\start-bridge.ps1 -Restart)")
@@ -591,6 +693,7 @@ async def status_handler(request: web.Request) -> web.Response:
         "plugin_connected": len(files) > 0,
         "plugin_version": expected_plugin_version(),
         "bridge_outdated": bridge_outdated(),
+        "update": UPDATE,
         "files": files,
         "pending": len(PENDING),
         "abandoned": [
@@ -700,7 +803,11 @@ def main():
 
     loop = asyncio.new_event_loop()
     loop.set_exception_handler(_quiet_connection_resets)
-    web.run_app(build_app(), host=args.host, port=args.port, print=None, loop=loop)
+    app = build_app()
+    if not os.environ.get("FIGMOSHA_NO_UPDATE_CHECK"):
+        app.on_startup.append(_start_update_checks)
+        app.on_cleanup.append(_stop_update_checks)
+    web.run_app(app, host=args.host, port=args.port, print=None, loop=loop)
 
 
 def _quiet_connection_resets(loop, context):

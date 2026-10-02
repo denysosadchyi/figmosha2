@@ -72,6 +72,13 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Added
 
+- **"New version" with an Update button.** The bridge asks GitHub every 6
+  hours how many commits this checkout is behind `master`. When there are new
+  ones, the plugin bar turns blue with "New version" and a white **Update**
+  button that opens the CHANGELOG on GitHub; `/status` has an `update` field,
+  `/exec` replies carry a `notice` and `figmosha doctor` says to `git pull`.
+  It stays silent when GitHub can't be reached or `HEAD` is a local commit, and
+  `FIGMOSHA_NO_UPDATE_CHECK=1` turns it off.
 - **Figmosha asks you to update a stale plugin.** `plugin/code.js` carries a
   `PLUGIN_VERSION` build id that the plugin reports on connect. When it differs
   from the file on disk — after a `git pull`, say — the plugin bar turns purple

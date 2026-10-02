@@ -26,6 +26,17 @@
   /* The bridge has newer plugin code on disk than this window is running. */
   body.outdated { background: #7b61ff; }
   body.multi.outdated #badge { color: #7b61ff; }
+  /* GitHub has a newer Figmosha than this checkout: "New version" + Update. */
+  body.update { background: #0d99ff; }
+  #update {
+    display: none; flex: none; order: 3; margin-left: auto;
+    padding: 2px 8px; border: 0; border-radius: 999px;
+    background: #fff; color: #0d99ff;
+    font: inherit; font-size: 10px; font-weight: 700; line-height: 1.2;
+    cursor: pointer;
+  }
+  body.update #update { display: block; }
+  body.update #badge { display: none; }
 
   #status { min-width: 0; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* With 2+ files connected the icon and "1/2" sit together in a white pill. */
@@ -54,6 +65,7 @@
   <span id="badge"><span id="peers"></span><span id="icon"></span></span>
   <svg id="fileicon" viewBox="0 0 16 24" aria-hidden="true"><path fill="currentColor" d="M4 .3h3.7v7.4H4A3.7 3.7 0 0 1 4 .3zM8.3.3H12a3.7 3.7 0 0 1 0 7.4H8.3zM4 8.3h3.7v7.4H4a3.7 3.7 0 0 1 0-7.4zM12 8.3a3.7 3.7 0 1 1 0 7.4 3.7 3.7 0 0 1 0-7.4zM4 16.3h3.7V20A3.7 3.7 0 1 1 4 16.3z"/></svg>
   <span id="status">Connecting…</span>
+  <button id="update" type="button">Update</button>
 
 <script>
 // Icons: Solar icon set by 480 Design — CC BY 4.0
@@ -68,6 +80,7 @@ const SERVER = "ws://localhost:8787/plugin";
 const statusEl = document.getElementById("status");
 const iconEl = document.getElementById("icon");
 const peersEl = document.getElementById("peers");
+const updateEl = document.getElementById("update");
 let ws = null;
 let reconnectTimer = null;
 const recentLog = [];
@@ -98,6 +111,8 @@ let busyHold = null;
 
 // Set when the bridge says plugin/code.js on disk is newer than this run.
 let outdated = false;
+// Set when the bridge found newer commits on GitHub: {behind, url}.
+let update = null;
 let statusText = "Connecting…";
 
 function render() {
@@ -106,9 +121,12 @@ function render() {
   const failed = state === "ok" && !busy && errorHold !== null;
   const stale = state === "ok" && !busy && !failed && outdated;
   peersEl.textContent = multi ? `${peers.index}/${peers.total}` : "";
-  statusEl.textContent = stale ? "New version: re-run plugin" : statusText;
+  // Re-run beats Update: a stale plugin has to be re-run before anything else.
+  const offer = state === "ok" && !busy && !failed && !stale && update !== null;
+  statusEl.textContent = stale ? "New version: re-run plugin"
+    : offer ? "New version" : statusText;
   iconEl.innerHTML = ICONS[busy || stale ? "pending" : failed ? "err" : state] || "";
-  document.body.className = (failed ? "err" : stale ? "ok outdated" : state)
+  document.body.className = (failed ? "err" : stale ? "ok outdated" : offer ? "ok update" : state)
     + (multi ? " multi" : "") + (busy ? " busy" : "");
 }
 
@@ -164,6 +182,7 @@ function connect() {
     // A new bridge may have different code on disk; it re-sends `outdated` at
     // hello time if this build is still behind.
     outdated = false;
+    update = null;
     setStatus(identity.name || "connected", "ok");
     log("[ws] connected" + (identity.name ? ` as ${identity.name}` : ""));
     sendHello();
@@ -188,6 +207,10 @@ function connect() {
     } else if (msg.type === "abort") {
       // The bridge gave up on this run; code.js marks it so h.ck() throws.
       parent.postMessage({ pluginMessage: { type: "abort", id: msg.id } }, "*");
+    } else if (msg.type === "update") {
+      update = { behind: msg.behind, url: msg.url };
+      updateEl.title = `${msg.behind} new commit(s) on GitHub`;
+      render();
     } else if (msg.type === "outdated") {
       outdated = true;
       log(`[outdated] running ${msg.running}, bridge has ${msg.expected}`);
@@ -210,6 +233,10 @@ function connect() {
     reconnectTimer = setTimeout(connect, 2000);
   };
 }
+
+updateEl.onclick = () => {
+  if (update) parent.postMessage({ pluginMessage: { type: "open-url", url: update.url } }, "*");
+};
 
 window.onmessage = (e) => {
   const m = e.data && e.data.pluginMessage;

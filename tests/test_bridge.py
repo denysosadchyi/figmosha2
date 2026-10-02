@@ -33,6 +33,7 @@ def clean_state():
         for registry in (bridge.PENDING, bridge.PLUGINS, bridge.LOCKS, bridge.ABANDONED):
             registry.clear()
         bridge.ALLOWED_HOSTS = set()
+        bridge.UPDATE = None
     reset()
     yield
     reset()
@@ -249,6 +250,41 @@ def test_outdated_plugin_is_told_to_rerun():
             assert "notice" not in await r.json()
         await c.close()
     run(go())
+
+
+def test_update_on_github_is_offered_to_plugins():
+    """When GitHub has newer commits, connected plugins get an `update` message
+    (the bar shows "New version" + Update), a plugin connecting later gets it at
+    hello, /status reports it and exec replies carry a notice."""
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c) as early:
+            await bridge.set_update(4)
+            await asyncio.sleep(0.05)
+            msg = [m for m in early.received if m["type"] == "update"][-1]
+            assert msg["behind"] == 4 and msg["url"].startswith("https://github.com/")
+
+            async with FakePlugin(c) as late:
+                assert any(m["type"] == "update" for m in late.received)
+
+            assert (await (await c.get("/status")).json())["update"]["behind"] == 4
+            r = await c.post("/exec", json={"code": "return 1"})
+            assert "git pull" in (await r.json())["notice"]
+
+            await bridge.set_update(0)
+            assert (await (await c.get("/status")).json())["update"] is None
+        await c.close()
+    run(go())
+
+
+@pytest.mark.parametrize("compare, behind", [
+    ({"status": "identical", "ahead_by": 0}, 0),
+    ({"status": "ahead", "ahead_by": 3}, 3),        # GitHub has 3 we lack
+    ({"status": "behind", "behind_by": 2}, 0),      # we are ahead: nothing to pull
+    ({"status": "diverged", "ahead_by": 1, "behind_by": 5}, 1),
+])
+def test_commits_behind(compare, behind):
+    assert bridge.commits_behind(compare) == behind
 
 
 def test_peers_counts_only_files_that_said_hello():

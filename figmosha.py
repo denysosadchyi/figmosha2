@@ -211,6 +211,11 @@ def cmd_doctor(args):
                  "re-run it in that file: Plugins → Development → Figmosha Bridge")
     if current and not stale:
         ok(f"plugin build {current} everywhere")
+    update = resp.get("update")
+    if update:
+        # Not a failure — everything works, there is just something newer.
+        print(f"  !  a newer Figmosha is on GitHub ({update.get('behind')} commit(s))")
+        print(f"     → git pull, restart the bridge, re-run the plugin   ({update.get('url')})")
 
     status, r = _exec("return 1 + 1;", 10)
     if status == 409 and r.get("abandoned"):

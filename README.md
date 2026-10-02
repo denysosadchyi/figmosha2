@@ -130,7 +130,7 @@ authentication beyond being on the machine.
 | Endpoint | Body | Returns |
 |---|---|---|
 | `POST /exec` | `{code, timeout?, target?, parallel?}` | `{ok, result, value, logs, elapsed_ms, notice?}` — `notice` when the plugin or bridge runs stale code |
-| `GET /status` | — | `{plugin_connected, plugin_version, bridge_outdated, files, pending, abandoned}` — each file has `plugin` and `outdated` |
+| `GET /status` | — | `{plugin_connected, plugin_version, bridge_outdated, update, files, pending, abandoned}` — each file has `plugin` and `outdated`; `update` is `{behind, url}` when GitHub has newer commits |
 | `GET /targets` | — | `{files: [{name, fileKey, conn}]}` — connected Figma files |
 | `POST /clear` | `{target?, force?}` | drops a file's abandoned-script interlock |
 | `GET /` | — | service banner listing the endpoints |
@@ -228,6 +228,11 @@ Two checks handle it:
 `--host 0.0.0.0` disables the Host check, because the reachable names are then
 unknowable. The bridge says so loudly at startup. Don't do it on a network you
 share.
+
+The bridge makes one outgoing request of its own: every 6 hours it asks the
+GitHub API how many commits your checkout is behind `master` (it sends the
+commit id, nothing else), so the plugin bar can offer an update. Set
+`FIGMOSHA_NO_UPDATE_CHECK=1` to turn that off.
 
 ## Requirements
 
