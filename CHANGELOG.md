@@ -8,6 +8,61 @@ After upgrading, **re-run the plugin in Figma** — a running plugin keeps the
 code it started with, so new helpers won't exist until you do. If
 `plugin/manifest.json` changed, re-*import* it rather than just re-running.
 
+## [2.2.0] — 2026-08-28
+
+### Added
+
+- **Multiple Figma files at once.** The bridge keeps one connection per open
+  file running the plugin instead of one globally. The plugin reports its
+  identity and `/exec` routes by a `target` (CLI `-T` / `--target`), resolved as
+  exact name → `fileKey` → unambiguous substring. `GET /targets` and
+  `figmosha targets` list what's connected. One file connected with no target
+  behaves exactly as before, so existing scripts don't change.
+- **Per-file exec lock.** A file's plugin sandbox is a single-threaded async
+  handler over one document and one undo stack, so two concurrent scripts
+  interleave at every `await` and invalidate each other's `findAll` snapshots.
+  `/exec` now takes a per-connection lock; callers on different files never wait
+  on each other. Read-only scripts can pass `parallel: true` (`--parallel`) to
+  bypass it and fan out.
+- **Abandoned-run interlock.** A script that outlives its `timeout` can't be
+  killed, and the next caller used to mutate the file underneath it. The `504`
+  now carries a `warning` and the request id, further execs on that file return
+  `409` until the orphan replies, and `POST /clear` (`figmosha clear -T <file>`)
+  lifts it. `force: true` pushes past.
+- **Cooperative cancellation.** `h.ck()` throws once the bridge has abandoned
+  the run, so a chunked sweep stops instead of mutating under the next caller.
+  `h.aborted()` is the non-throwing form. Older plugin builds ignore the signal.
+- **The same document open in several tabs or windows.** Each view registers its
+  own connection and `-T` routes to the newest live one; `/status` flags the
+  extra views with `sameDocAs`.
+
+### Fixed
+
+- **One file open in two tabs looped forever.** Any second `hello` for a known
+  file name evicted the incumbent, so each side kicked the other out and the
+  loser reconnected 2s later and kicked back. A live connection is now never
+  evicted: `hello` replaces an older same-file registration only when its socket
+  is already closed or it fails a 1s liveness ping.
+- **Two different files sharing a name are still refused**, and now for the
+  right reason. The plugin sends a `docSig` — a hash of its page node ids, since
+  `figma.fileKey` is null for a local dev plugin and `figma.root.id` is `"0:0"`
+  everywhere — so the bridge distinguishes two views of one document from two
+  documents, instead of treating both as ambiguous.
+- **Connections registered unnamed, so `-T` could not find them.** The plugin
+  UI's identity handler wrote to a `#server` element that no longer exists; it
+  threw before `sendHello()` ran.
+- **The bridge log stayed empty.** `start-bridge.sh` piped `bridge.py` into
+  `tee` without `-u`, so Python block-buffered stdout and plugin
+  connect/disconnect events were invisible exactly when they were needed.
+- In-flight requests routed to a dead connection fail fast instead of hanging,
+  and a dead connection drops its abandoned interlock with it.
+
+### Removed
+
+- The single-slot `1008` rejection and its `Slot busy` UI state, with the 15s
+  backoff. The bridge no longer turns away a second connection for a file, and a
+  tab that becomes visible again reconnects immediately.
+
 ## [2.1.0] — 2026-08-18
 
 ### Security
@@ -88,4 +143,5 @@ code it started with, so new helpers won't exist until you do. If
 - `h.*` helpers, high-level CLI subcommands, and `hint` fields on recognised
   errors.
 
+[2.2.0]: https://github.com/denysosadchyi/figmosha2/releases/tag/v2.2.0
 [2.1.0]: https://github.com/denysosadchyi/figmosha2/releases/tag/v2.1.0

@@ -1,5 +1,37 @@
 figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 
+// Tell the UI which file we're in, so it can register this connection with the
+// bridge by name (figma.root.name). The bridge routes --target by that name.
+function postIdentity() {
+  let fileKey = null;
+  try { fileKey = figma.fileKey || null; } catch (e) { /* not always available */ }
+  figma.ui.postMessage({
+    type: "identity",
+    fileKey: fileKey,
+    name: figma.root.name,
+    docSig: docSignature(),
+  });
+}
+
+// `figma.fileKey` is null for a local dev plugin and `figma.root.id` is "0:0" in
+// every file, so neither identifies the document. Page node ids are file-scoped
+// and stable, so their list distinguishes "the same file open in two windows"
+// (identical signature) from "two different files that happen to share a name"
+// (different signature). The bridge needs that to route a target safely.
+function docSignature() {
+  try {
+    const ids = figma.root.children.map((p) => p.id).join(",");
+    let hash = 5381;
+    for (let i = 0; i < ids.length; i++) {
+      hash = ((hash * 33) ^ ids.charCodeAt(i)) >>> 0;
+    }
+    return hash.toString(16);
+  } catch (e) {
+    return null;
+  }
+}
+postIdentity();
+
 function safeStringify(value) {
   if (value === undefined) return null;
   try { return JSON.parse(JSON.stringify(value)); } catch (e) {
@@ -316,7 +348,16 @@ const HELPERS = {
 
 // ──────────────────────────────────────────────────────────────────────────
 
+// Ids the bridge gave up waiting for. A running script cannot be killed, so
+// cancellation is cooperative: long loops call h.ck() and bail out.
+const ABORTED = new Set();
+
 figma.ui.onmessage = async (msg) => {
+  if (msg.type === "need-identity") { postIdentity(); return; }
+  if (msg.type === "abort") {
+    if (msg.id) ABORTED.add(msg.id);
+    return;
+  }
   if (msg.type !== "exec") return;
   const { id, code } = msg;
 
@@ -329,14 +370,24 @@ figma.ui.onmessage = async (msg) => {
     figma.ui.postMessage({ type: "log", id, text });
   };
 
+  // Per-exec helper view: h.ck() throws once the bridge has abandoned this run,
+  // so chunked sweeps stop instead of mutating under the next caller.
+  const h = Object.create(HELPERS);
+  h.ck = () => {
+    if (ABORTED.has(id)) throw new Error("aborted: bridge stopped waiting for this script");
+    return true;
+  };
+  h.aborted = () => ABORTED.has(id);
+
   CURRENT_PRINT = print;
   try {
     const fn = new Function(
       "figma", "print", "h",
       `return (async () => { ${code} })();`
     );
-    const result = await fn(figma, print, HELPERS);
+    const result = await fn(figma, print, h);
 
+    ABORTED.delete(id);
     figma.ui.postMessage({
       type: "result",
       id,
@@ -344,6 +395,7 @@ figma.ui.onmessage = async (msg) => {
       value: safeStringify(result),
     });
   } catch (e) {
+    ABORTED.delete(id);
     figma.ui.postMessage({
       type: "error",
       id,

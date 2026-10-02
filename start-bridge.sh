@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Start (or restart) the Figmosha bridge inside a detached tmux session.
-# Run from WSL: bash ~/figmosha2/start-bridge.sh
+# Usage: bash ~/figmosha2/start-bridge.sh   (also run automatically by the Claude Code SessionStart hook)
 set -e
 SESSION="figmosha-bridge"
 cd "$(dirname "$0")"
 
 tmux kill-session -t "$SESSION" 2>/dev/null || true
-tmux new-session -d -s "$SESSION" "./venv/bin/python bridge.py 2>&1 | tee /tmp/figmosha-bridge.log"
+# -u: without it Python block-buffers stdout through the pipe and the log file stays
+# empty, so plugin connect/disconnect events are invisible exactly when you need them.
+tmux new-session -d -s "$SESSION" "./venv/bin/python -u bridge.py 2>&1 | tee /tmp/figmosha-bridge.log"
 
 # Wait for it to be up
 for i in 1 2 3 4 5 6 7 8 9 10; do
