@@ -108,7 +108,7 @@ def _exec(code, timeout=60):
 
 def _emit(resp, raw=False):
     if raw:
-        print(json.dumps(resp, indent=2))
+        print(json.dumps(resp, indent=2, ensure_ascii=False))
         return 0 if resp.get("ok") else 1
 
     for line in resp.get("logs") or []:
@@ -134,7 +134,7 @@ def _emit(resp, raw=False):
 
 def cmd_status(args):
     status, resp = _request("GET", "/status")
-    print(json.dumps(resp, indent=2))
+    print(json.dumps(resp, indent=2, ensure_ascii=False))
     return 0 if status == 200 else 2
 
 
@@ -196,6 +196,17 @@ def cmd_doctor(args):
     ok("plugin connected")
 
     status, r = _exec("return 1 + 1;", 10)
+    if status == 409 and r.get("abandoned"):
+        fail(f"file is interlocked: {r.get('error')}",
+             "wait for that script to finish, or:  figmosha clear -T <file>")
+        return 1
+    if status == 409:
+        # Several files connected and no -T, or an ambiguous one — the plugin is
+        # fine, the request just doesn't say which file it means.
+        fail(r.get("error", "target required"),
+             "pick one with -T, e.g.  figmosha doctor -T \"<file name>\"   "
+             "(figmosha targets lists them)")
+        return 1
     if not r.get("ok") or r.get("value") != 2:
         fail(f"round trip failed: {r.get('error', r)}",
              "close the plugin window in Figma and run it again")

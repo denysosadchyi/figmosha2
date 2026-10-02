@@ -162,8 +162,12 @@ def _label(conn_id: str) -> str:
 
 
 async def _broadcast_peers():
-    """Tell every connected plugin its position and the total, for the "1/2" badge."""
-    live = _live_plugins()
+    """Tell every connected plugin its position and the total, for the "1/2" badge.
+
+    Only connections that have said `hello` count: one that just opened is not a
+    file yet, and counting it made the badge flash "1/3" during a reconnect.
+    """
+    live = [(cid, i) for cid, i in _live_plugins() if i.get("hello")]
     for idx, (_, info) in enumerate(live, 1):
         try:
             await info["ws"].send_str(json.dumps(
@@ -244,6 +248,7 @@ async def plugin_ws_handler(request: web.Request):
                 PLUGINS[conn_id]["fileKey"] = file_key
                 PLUGINS[conn_id]["name"] = name
                 PLUGINS[conn_id]["docSig"] = doc_sig
+                PLUGINS[conn_id]["hello"] = True
                 print(f"[plugin] hello v{m.get('version', '?')} "
                       f"file={name!r} key={file_key} sig={doc_sig}")
                 await _broadcast_peers()

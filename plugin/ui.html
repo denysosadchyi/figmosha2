@@ -172,6 +172,9 @@ function connect() {
       // Liveness probe: the bridge sends this when another plugin instance
       // wants the slot. Answering keeps ours.
       try { ws.send(JSON.stringify({ type: "pong" })); } catch (e) {}
+    } else if (msg.type === "abort") {
+      // The bridge gave up on this run; code.js marks it so h.ck() throws.
+      parent.postMessage({ pluginMessage: { type: "abort", id: msg.id } }, "*");
     } else if (msg.type === "peers") {
       setPeers({ index: msg.index, total: msg.total });
     }

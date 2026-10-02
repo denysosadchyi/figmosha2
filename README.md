@@ -64,8 +64,8 @@ Each arrow carries a request out and its result back. Every open file running th
 
 - **One Python file** server + **one Python file** CLI, ~500 lines total. No npm. No frameworks.
 - **Custom Figma plugin**, ~250 lines (JS + HTML). Imported in dev mode — no publishing.
-- **20 helpers** baked into the plugin runtime as `h.*` so scripts stay short and safe (`h.bF`, `h.setText`, `h.withFonts`, `h.frame`, `h.hex`, `h.sel`, …).
-- **11 high-level CLI subcommands** for common ops (`doctor`, `sel`, `tree`, `find`, `text`, `variant`, `clone`, `rm`, `icomp`, …).
+- **22 helpers** baked into the plugin runtime as `h.*` so scripts stay short and safe (`h.bF`, `h.setText`, `h.withFonts`, `h.frame`, `h.hex`, `h.sel`, `h.ck`, …).
+- **13 high-level CLI subcommands** for common ops (`doctor`, `targets`, `sel`, `tree`, `find`, `text`, `variant`, `clone`, `rm`, `icomp`, `clear`, …).
 - **`figmosha doctor`** walks the whole chain — bridge, plugin, round trip, which file is open — and names the fix at whichever link is broken.
 - **Smart error hints** in responses — when a script fails with a known-pattern error, the response includes a `hint` field telling you how to fix it.
 - **Works while Figma is minimized.** WebSocket stays alive; JavaScript keeps executing in the background.
@@ -260,7 +260,7 @@ git clone https://github.com/denysosadchyi/figmosha2.git
 cd figmosha2
 
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt     # macOS / Linux / WSL
-python  -m venv venv && .\venv\Scripts\pip install -r requirements.txt  # Windows
+python  -m venv venv; .\venv\Scripts\pip install -r requirements.txt   # Windows (PowerShell)
 
 bash start-bridge.sh        # detached tmux session "figmosha-bridge"
 .\start-bridge.ps1          # native Windows, detached

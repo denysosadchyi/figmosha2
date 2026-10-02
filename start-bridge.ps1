@@ -84,6 +84,12 @@ if ($now) {
     Write-Host "log: $log"
     Write-Host "now run the plugin: Figma > Plugins > Development > Figmosha Bridge"
 } else {
-    Write-Host "bridge did not come up - check $log and bridge.err.log" -ForegroundColor Red
-    if (Test-Path $log) { Get-Content $log -Tail 20 }
+    # Python puts the actual reason (a missing aiohttp, a taken port) on stderr.
+    $errLog = Join-Path $root "bridge.err.log"
+    Write-Host "bridge did not come up - last lines of bridge.err.log:" -ForegroundColor Red
+    if (Test-Path $errLog) { Get-Content $errLog -Tail 20 }
+    if ((Get-Content $errLog -Raw -ErrorAction SilentlyContinue) -match "No module named 'aiohttp'") {
+        Write-Host "fix: pip install -r requirements.txt (with the venv's pip if you use one)" -ForegroundColor Yellow
+    }
+    exit 1
 }

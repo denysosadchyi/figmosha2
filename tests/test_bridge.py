@@ -29,14 +29,13 @@ def run(coro):
 @pytest.fixture(autouse=True)
 def clean_state():
     """The module keeps its state in globals; give every test a fresh one."""
-    bridge.PENDING.clear()
-    bridge.PLUGIN_WS = None
-    bridge.PLUGIN_LAST_SEEN = 0.0
-    bridge.ALLOWED_HOSTS = set()
+    def reset():
+        for registry in (bridge.PENDING, bridge.PLUGINS, bridge.LOCKS, bridge.ABANDONED):
+            registry.clear()
+        bridge.ALLOWED_HOSTS = set()
+    reset()
     yield
-    bridge.PENDING.clear()
-    bridge.PLUGIN_WS = None
-    bridge.ALLOWED_HOSTS = set()
+    reset()
 
 
 class FakePlugin:
@@ -49,6 +48,8 @@ class FakePlugin:
         self.ws = None
         self._task = None
         self.seen_codes = []
+        self.exec_ids = []
+        self.received = []   # every message the bridge sent, in order
 
     async def __aenter__(self):
         self.ws = await self.client.ws_connect("/plugin", headers={"Origin": "null"})
@@ -73,11 +74,13 @@ class FakePlugin:
             if msg.type != aiohttp.WSMsgType.TEXT:
                 continue
             m = json.loads(msg.data)
+            self.received.append(m)
             if m.get("type") == "ping":
                 if self.answer_ping:
                     await self.ws.send_str(json.dumps({"type": "pong"}))
             elif m.get("type") == "exec":
                 self.seen_codes.append(m["code"])
+                self.exec_ids.append(m["id"])
                 out = self.reply(m["code"])
                 await self.ws.send_str(json.dumps(
                     {"type": out.pop("type", "result"), "id": m["id"], **out}))
@@ -183,6 +186,51 @@ def test_timeout_returns_504_and_clears_pending():
             r = await c.post("/exec", json={"code": "sleep", "timeout": 0.3})
             assert r.status == 504
             assert bridge.PENDING == {}
+        await c.close()
+    run(go())
+
+
+def test_timed_out_script_interlocks_the_file_until_it_finishes():
+    """A 504 does not stop the script, so the next exec on that file must get a
+    409 instead of racing it; the plugin is told to abort (h.ck), and the
+    interlock lifts by itself once the orphan finally replies."""
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c, reply=lambda code: {"type": "__drop__"}) as plugin:
+            r = await c.post("/exec", json={"code": "slow", "timeout": 0.3})
+            assert r.status == 504
+            orphan = plugin.exec_ids[0]
+
+            r = await c.post("/exec", json={"code": "next", "timeout": 0.3})
+            body = await r.json()
+            assert r.status == 409 and body["abandoned"] == [orphan[:8]]
+            assert {"type": "abort", "id": orphan} in plugin.received
+
+            await plugin.ws.send_str(json.dumps(
+                {"type": "result", "id": orphan, "text": "late"}))
+            await asyncio.sleep(0.1)
+            assert bridge.ABANDONED == {}
+            plugin.reply = lambda code: {"text": "ok", "value": 1}
+            r = await c.post("/exec", json={"code": "after", "timeout": 2})
+            assert r.status == 200
+        await c.close()
+    run(go())
+
+
+def test_peers_counts_only_files_that_said_hello():
+    """The plugin bar's "1/2" pill: each identified connection learns its index
+    and the total; a socket that has not sent `hello` yet is not a file."""
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c) as a, FakePlugin(c) as b:
+            await asyncio.sleep(0.1)
+            silent = await c.ws_connect("/plugin", headers={"Origin": "null"})
+            await a.ws.send_str(json.dumps({"type": "hello", "name": "FileA"}))
+            await asyncio.sleep(0.1)
+            last = lambda p: [m for m in p.received if m["type"] == "peers"][-1]
+            assert last(a) == {"type": "peers", "index": 1, "total": 2}
+            assert last(b) == {"type": "peers", "index": 2, "total": 2}
+            await silent.close()
         await c.close()
     run(go())
 

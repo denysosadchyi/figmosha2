@@ -49,6 +49,24 @@ code it started with, so new helpers won't exist until you do. If
 - `CLAUDE.md` told Claude to start the bridge with bash and tmux and described
   one maintainer's Mac. It now covers macOS / Linux / WSL and native Windows,
   with machine specifics left to `CLAUDE.local.md`.
+- **`h.ck()` never fired.** The bridge sent `abort` for a timed-out run, but
+  the plugin UI dropped every message type except `exec` and `ping`, so the
+  sandbox never heard about it. The UI now forwards `abort`.
+- `figmosha doctor` with several files connected and no `-T` told you to
+  re-run the plugin; it now says to pick a file with `-T`, and to
+  `figmosha clear` when the file is interlocked by a timed-out script.
+- `--raw` and `status` printed non-Latin text as `П…` escapes.
+- The `1/2` pill counted connections that had not identified themselves yet,
+  so it could flash `1/3` while a tab reconnected.
+- `start-bridge.ps1` exited 0 when the bridge failed to start and showed the
+  stdout log, while the reason is on stderr. It now prints the tail of
+  `bridge.err.log`, suggests installing the requirements when `aiohttp` is
+  missing, and exits 1.
+- README's Windows venv line used `&&`, which Windows PowerShell 5.1 rejects;
+  helper and subcommand counts were out of date.
+- The bridge test fixture reset globals that no longer exist instead of the
+  multi-file registries. New tests cover the timeout interlock (504 → 409 →
+  lifts when the orphan replies, `abort` sent) and the `1/2` counter.
 - `tests/helpers.test.js` crashed before running a single check: `code.js`
   now reads `figma.root.name` on load and the test's Figma stub had no `root`.
 
