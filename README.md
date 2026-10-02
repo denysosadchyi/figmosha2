@@ -237,20 +237,20 @@ share.
 
 ## Install
 
-Hand this repo to Claude Code and let it do the setup:
+Hand this repo to a coding agent — Claude Code, Codex, or any agent that reads `AGENTS.md` — and let it do the setup:
 
 ```
 https://github.com/denysosadchyi/figmosha2 — set this up for me
 ```
 
-It clones the repo, creates the venv, installs `aiohttp`, starts the bridge, and tells you what to click in Figma. `CLAUDE.md` in the repo root is written for exactly this — Claude reads it and knows the whole workflow, including the WSL2 path juggling if that's your setup.
+It clones the repo, creates the venv, installs the requirements, starts the bridge, and tells you what to click in Figma. `AGENTS.md` in the repo root is written for exactly this — Codex reads it directly, Claude Code through `CLAUDE.md`, which imports it — so the agent knows the whole workflow on macOS, Linux, WSL2 or native Windows.
 
-Two things Claude cannot do for you, because Figma exposes no API for either:
+Two things the agent cannot do for you, because Figma exposes no API for either:
 
 1. **Import the plugin** — in Figma Desktop: **Plugins → Development → Import plugin from manifest…**, pick `plugin/manifest.json` from the repo. Once, ever.
 2. **Run the plugin** — **Plugins → Development → Figmosha Bridge**. A small green bar with the file's name appears; the bridge logs `[plugin] connected from 127.0.0.1`. You're live.
 
-Ask Claude for the smoke test and it will confirm the round trip works end to end.
+Ask the agent for the smoke test and it will confirm the round trip works end to end.
 
 <details>
 <summary>Prefer to do it by hand?</summary>
@@ -437,7 +437,8 @@ plugin/
 tests/
   test_bridge.py       Bridge driven by a fake plugin over a real WebSocket
   helpers.test.js      Pure helpers against a stubbed Figma
-CLAUDE.md              Conventions for Claude Code sessions driving Figmosha
+AGENTS.md              Conventions for coding agents (Codex, Claude Code…) driving Figmosha
+CLAUDE.md              One line, `@AGENTS.md`, so Claude Code loads the same file
 CLAUDE.local.md        Your machine's paths and hosts — gitignored, never committed
 README.md              This file
 ```

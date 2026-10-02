@@ -54,6 +54,10 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Added
 
+- **Codex and other agents can set Figmosha up.** The agent instructions moved
+  from `CLAUDE.md` to `AGENTS.md`, the file Codex reads; `CLAUDE.md` is now one
+  line, `@AGENTS.md`, so Claude Code loads the same text and there is nothing to
+  keep in sync.
 - `requirements.txt` (runtime) and `requirements-dev.txt` (adds `pytest`), so
   setup is one `pip install -r` instead of package names spread across the docs.
 
