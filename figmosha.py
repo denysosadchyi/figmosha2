@@ -242,8 +242,8 @@ def cmd_doctor(args):
         # Several files connected and no -T, or an ambiguous one — the plugin is
         # fine, the request just doesn't say which file it means.
         fail(r.get("error", "target required"),
-             "pick one with -T, e.g.  figmosha doctor -T \"<file name>\"   "
-             "(figmosha targets lists them)")
+             "pick one with -T: a file name, or the doc id from `figmosha targets` "
+             "when two files share a name")
         return 1
     if not r.get("ok") or r.get("value") != 2:
         fail(f"round trip failed: {r.get('error', r)}",
