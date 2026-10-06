@@ -84,6 +84,9 @@ python figmosha.py exec --file build.js -T "Component Library" --queue-timeout 3
   reply is **503 `file busy`** naming who holds the file, and **nothing was run** — retrying is safe,
   unlike after a 504.
 - A caller that hangs up while queued is dropped from the queue; its script never runs.
+- **Speed.** A round trip is ~2 ms over HTTP and ~100 ms through the CLI (Python start-up) — for
+  dozens of small calls from code, POST to `/exec` directly. Return what you need, not whole trees:
+  a 50k-item result costs ~250 ms, a 5 MB one about the same.
 - **Don't pause with `setTimeout` in scripts.** Figma throttles timers in background tabs:
   `setTimeout(30)` takes ~30ms in the visible tab and up to ~1s in a background one, and every
   agent queued behind you pays for it. Figma API calls stay fast in the background.

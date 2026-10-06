@@ -4,7 +4,7 @@ figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 // disk and asks for a re-Run when they differ, because a running plugin keeps
 // the code it started with. Bump it on every change to plugin/ —
 // tests/test_plugin_version.py fails until you do.
-const PLUGIN_VERSION = "2026-10-06.2";
+const PLUGIN_VERSION = "2026-10-06.4";
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
@@ -63,6 +63,32 @@ function safeStringify(value) {
   try { return JSON.parse(JSON.stringify(value)); } catch (e) {
     try { return String(value); } catch (e2) { return null; }
   }
+}
+
+// The `result` message for a finished exec. It carries the value once: the
+// bridge derives the human-readable `result` text from it. Sending both, as
+// before, doubled every payload and pretty-printed objects a third time — a
+// 50k-item array took ~0.6 s to come back. `text` is only sent when the value
+// can't express it: no return value (logs or "Done"), or NaN / BigInt / etc.
+function resultMessage(id, result, logs) {
+  const t = typeof result;
+  if (result === undefined) {
+    return { type: "result", id, value: null, text: asText(result, logs) };
+  }
+  if (t === "string" || t === "boolean" || (t === "number" && isFinite(result))) {
+    return { type: "result", id, value: result };
+  }
+  if (t === "object") {  // objects, arrays, null
+    // Serialized exactly once, here. The UI splices this string into the
+    // WebSocket frame as is, so the object is never cloned across postMessage
+    // or stringified again (that was 3 passes over a big result).
+    try {
+      const json = JSON.stringify(result);
+      if (json !== undefined) return { type: "result", id, valueJson: json };
+    } catch (e) { /* cyclic, BigInt inside… — fall through */ }
+    return { type: "result", id, value: safeStringify(result) };
+  }
+  return { type: "result", id, value: safeStringify(result), text: String(result) };
 }
 
 function asText(value, logs) {
@@ -395,12 +421,27 @@ figma.ui.onmessage = async (msg) => {
   const { id, code } = msg;
 
   const logs = [];
+  // print() lines go to the bridge in batches, not one message per line: each
+  // message crosses two hops (sandbox -> UI -> WebSocket), and 20k separate
+  // lines took ~0.5 s. They are still streamed (flushed every 200 lines or
+  // 100 ms), so a script that times out still returns the logs it got to.
+  let unsent = [];
+  let flushTimer = null;
+  const flushLogs = () => {
+    if (flushTimer !== null) { clearTimeout(flushTimer); flushTimer = null; }
+    if (unsent.length) {
+      figma.ui.postMessage({ type: "log", id, lines: unsent });
+      unsent = [];
+    }
+  };
   const print = (...args) => {
     const text = args.map((a) =>
       typeof a === "object" ? JSON.stringify(a, null, 2) : String(a)
     ).join(" ");
     logs.push(text);
-    figma.ui.postMessage({ type: "log", id, text });
+    unsent.push(text);
+    if (unsent.length >= 200) flushLogs();
+    else if (flushTimer === null) flushTimer = setTimeout(flushLogs, 100);
   };
 
   // Per-exec helper view: h.ck() throws once the bridge has abandoned this run,
@@ -421,14 +462,11 @@ figma.ui.onmessage = async (msg) => {
     const result = await fn(figma, print, h);
 
     ABORTED.delete(id);
-    figma.ui.postMessage({
-      type: "result",
-      id,
-      text: asText(result, logs),
-      value: safeStringify(result),
-    });
+    flushLogs();
+    figma.ui.postMessage(resultMessage(id, result, logs));
   } catch (e) {
     ABORTED.delete(id);
+    flushLogs();
     figma.ui.postMessage({
       type: "error",
       id,

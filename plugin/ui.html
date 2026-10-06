@@ -258,7 +258,15 @@ window.onmessage = (e) => {
     log(`[drop] ws not open, ${m.type} id=${shortId(m.id)}`);
     return;
   }
-  try { ws.send(JSON.stringify(m)); } catch (err) {
+  try {
+    if (typeof m.valueJson === "string") {
+      // Already-serialized result: splice it in rather than parse + re-stringify.
+      const { valueJson, ...rest } = m;
+      ws.send(JSON.stringify(rest).slice(0, -1) + ',"value":' + valueJson + "}");
+    } else {
+      ws.send(JSON.stringify(m));
+    }
+  } catch (err) {
     log("[send] failed: " + err.message);
     return;
   }

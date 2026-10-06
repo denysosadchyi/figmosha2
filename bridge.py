@@ -446,7 +446,11 @@ async def plugin_ws_handler(request: web.Request):
                 continue
 
             if mtype == "log":
-                entry["logs"].append(m.get("text", ""))
+                # Batched `lines` from current plugins; one `text` from older ones.
+                if isinstance(m.get("lines"), list):
+                    entry["logs"].extend(str(x) for x in m["lines"])
+                else:
+                    entry["logs"].append(m.get("text", ""))
             elif mtype in ("result", "error"):
                 if not entry["future"].done():
                     entry["future"].set_result(m)
@@ -758,6 +762,26 @@ async def _dispatch(target_ws, conn_id, code, timeout, force, meta=None) -> web.
         PENDING.pop(rid, None)
 
 
+def _result_text(result) -> str:
+    """The human-readable `result`: sent by the plugin only when the value can't
+    carry it (older plugins always send it); otherwise derived from the value,
+    so the plugin ships each result once instead of twice."""
+    text = result.get("text")
+    if text is not None:
+        return text
+    value = result.get("value")
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    compact = json.dumps(value, ensure_ascii=False)
+    # Indented output uses Python's pure-Python encoder (~6x slower than the C
+    # one): ~120 ms on a 3 MB result. Past 1 MB nobody reads it by eye anyway.
+    if len(compact) > 1_000_000:
+        return compact
+    return json.dumps(value, indent=2, ensure_ascii=False)
+
+
 def _reply(entry, result, meta=None) -> web.Response:
     elapsed_ms = int((time.time() - entry["t0"]) * 1000)
 
@@ -775,7 +799,7 @@ def _reply(entry, result, meta=None) -> web.Response:
     else:
         body = {
             "ok": True,
-            "result": result.get("text", ""),
+            "result": _result_text(result),
             "value": result.get("value"),
             "logs": entry["logs"],
             "elapsed_ms": elapsed_ms,
@@ -949,7 +973,9 @@ def main():
         print(f"[bridge] WARNING: bound to {args.host} — Host check disabled, "
               f"anyone who can reach this port can run code in your Figma file")
 
-    print(f"[bridge] listening on http://{args.host}:{args.port}")
+    hosts = _bind_hosts(args.host, args.port)
+    print(f"[bridge] listening on http://{args.host}:{args.port}"
+          + (" (and [::1], so 'localhost' is fast)" if "::1" in hosts else ""))
     print(f"[bridge] plugin should connect to ws://localhost:{args.port}/plugin")
     print(f"[bridge] try: curl -X POST http://localhost:{args.port}/exec "
           f"-H 'Content-Type: application/json' "
@@ -961,7 +987,27 @@ def main():
     if not os.environ.get("FIGMOSHA_NO_UPDATE_CHECK"):
         app.on_startup.append(_start_update_checks)
         app.on_cleanup.append(_stop_update_checks)
-    web.run_app(app, host=args.host, port=args.port, print=None, loop=loop)
+    web.run_app(app, host=hosts, port=args.port, print=None, loop=loop)
+
+
+def _bind_hosts(host, port):
+    """Where to listen. For the default loopback, both 127.0.0.1 and ::1.
+
+    `localhost` resolves to ::1 first on Windows (and on many Linux setups).
+    With only 127.0.0.1 bound, every client that says `localhost` — the CLI,
+    curl, an agent's own script — waits ~2 s for the IPv6 attempt to be refused
+    before falling back, on EVERY request. Listening on ::1 too removes that.
+    Skipped quietly where IPv6 is unavailable.
+    """
+    if host != "127.0.0.1":
+        return [host]
+    import socket
+    try:
+        with socket.socket(socket.AF_INET6, socket.SOCK_STREAM) as probe:
+            probe.bind(("::1", port))
+    except OSError:
+        return [host]
+    return [host, "::1"]
 
 
 def _quiet_connection_resets(loop, context):

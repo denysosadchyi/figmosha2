@@ -449,3 +449,41 @@ def test_find_hint(error_text, expected):
         assert hint is None
     else:
         assert expected in hint
+
+
+# ─── result shape (the plugin ships each value once) ──────────────────────
+
+@pytest.mark.parametrize("msg, text", [
+    ({"value": "plain"}, "plain"),
+    ({"value": 42}, "42"),
+    ({"value": True}, "true"),
+    ({"value": None}, "null"),
+    ({"value": {"a": [1, "Привіт"]}}, '{\n  "a": [\n    1,\n    "Привіт"\n  ]\n}'),
+    ({"value": None, "text": "Done"}, "Done"),          # no return value
+    ({"value": None, "text": "NaN"}, "NaN"),            # value can't say it
+    ({"value": 1, "text": "from an older plugin"}, "from an older plugin"),
+])
+def test_result_text_is_derived_from_the_value(msg, text):
+    assert bridge._result_text(msg) == text
+
+
+def test_huge_results_skip_the_slow_pretty_printer():
+    big = [{"id": i} for i in range(200_000)]
+    text = bridge._result_text({"value": big})
+    assert "\n" not in text and json.loads(text) == big
+
+
+def test_batched_log_lines_arrive_in_order():
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c, reply=lambda code: {"type": "__drop__"}) as p:
+            task = asyncio.create_task(c.post("/exec", json={"code": "x", "timeout": 5}))
+            await asyncio.sleep(0.1)
+            rid = p.exec_ids[0]
+            await p.ws.send_str(json.dumps({"type": "log", "id": rid, "lines": ["a", "b"]}))
+            await p.ws.send_str(json.dumps({"type": "log", "id": rid, "text": "c"}))  # old plugin
+            await p.ws.send_str(json.dumps({"type": "result", "id": rid, "value": 1}))
+            body = await (await task).json()
+            assert body["logs"] == ["a", "b", "c"] and body["result"] == "1"
+        await c.close()
+    run(go())

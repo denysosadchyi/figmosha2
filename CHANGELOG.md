@@ -27,6 +27,18 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Fixed
 
+- **Every CLI call took ~2 s on Windows.** The CLI talked to `localhost`, which
+  Windows resolves to `::1` first; the bridge only listened on `127.0.0.1`, so
+  each request waited for the IPv6 attempt to fail. The bridge now also listens
+  on `::1` (any client saying `localhost` is fast) and the CLI defaults to
+  `127.0.0.1`. A CLI call went from 2157 ms to ~100 ms, an HTTP call to ~2 ms.
+- **Big results were shipped twice.** The plugin sent every result as both
+  `text` and `value`, and serialized objects three times on the way. It now
+  serializes once and sends the value only; the bridge derives the `result`
+  text (compact JSON past 1 MB, where indenting alone cost ~120 ms). A 50k-item
+  result: 641 → 255 ms; a 5 MB string: 495 → 250 ms. The HTTP API is unchanged.
+- **`print()` sent one message per line** through two hops; 20k lines took
+  ~0.5 s. Lines are batched now (every 200 lines or 100 ms): 492 → 37 ms.
 - **Two new "Untitled" files were treated as one document**, so every write
   went to the newest and the other file was unreachable. The plugin identified a
   document by its page ids, and every new file starts with page `0:1`. It now
