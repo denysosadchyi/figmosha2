@@ -1,29 +1,53 @@
 # Figmosha 2.0
 
-Drive Figma from your terminal / Claude Code / any HTTP client. A tiny custom plugin sits inside Figma Desktop and holds a WebSocket to a local Python server — you send Figma Plugin API code over HTTP and get the result back.
+Drive Figma from your terminal, from coding agents (Claude Code, Codex…) or from any HTTP client. A tiny custom plugin sits inside Figma Desktop and holds a WebSocket to a local Python server — you send Figma Plugin API code over HTTP and get the result back. Several agents can work in several Figma files at once.
 
 No clipboard hacks. No screenshots.
 
-Fast enough to feel synchronous: reads ~5 ms, mutations ~30 ms, library component import ~150 ms.
+Fast enough to feel synchronous: a round trip is ~2 ms over HTTP (~100 ms through the CLI, which is mostly Python starting up); a library component import ~150 ms.
 
 <img width="1269" height="779" alt="The Figmosha Bridge plugin in Figma: a green bar with the file name and a 2/2 pill" src="docs/plugin-bar-2026-10.png" />
 
 ## What's new
 
-- **Several Figma files at once.** Run the plugin in every file you want to
-  drive; each one gets its own connection and you pick it with `-T "<file name>"`.
-  `figmosha targets` lists what's connected. With one file open nothing changes.
-- **Safe for several callers.** Scripts on the same file run one after another
-  instead of interleaving; scripts on different files don't wait on each other.
-  Read-only scripts can skip the queue with `--parallel`.
-- **Timeouts don't corrupt files.** A script that outlives its timeout blocks
-  further writes to that file until it finishes (or `figmosha clear -T <file>`),
-  and long sweeps can stop themselves with `h.ck()`.
-- **The same file in several tabs works**, instead of the tabs kicking each
-  other off the bridge.
-- **A plugin bar that tells you what's going on.** It shows the file's name, a
-  `2/2` pill when more than one file is connected, a spinner while a script runs,
-  and turns red for a moment when one fails.
+**Several agents, several files**
+
+- **Many Figma files at once.** Run the plugin in each file; pick one with
+  `-T "<file name>"` or its stable document id from `figmosha targets` — two
+  files that are both called "Untitled" are told apart.
+- **A queue per file.** Agents writing to the same file run one after another,
+  never interleaved; agents in different files run in parallel (measured: two
+  files ≈ 2× the throughput of one). `targets` shows who is running and who is
+  waiting; agents name themselves with `--agent`.
+- **Bounded waits.** `--queue-timeout 30` gives up with `503 file busy` — and a
+  busy reply guarantees nothing ran, so retrying is safe.
+- **Timeouts can't corrupt a file.** A script that outlives its timeout keeps the
+  file locked until it really ends, and `h.ck()` in a loop stops it right at its
+  timeout — even a tight loop that never yields.
+
+**Faster**
+
+- **Every CLI call on Windows: 2.1 s → 0.1 s.** `localhost` tried IPv6 first and
+  waited for it to fail; the bridge now listens on both.
+- Big results come back about twice as fast, and `print()`-heavy scripts ~14×.
+
+**Easier to run**
+
+- **macOS / Linux:** `start-bridge.sh` no longer needs tmux or a venv, has
+  `--stop`, and explains a busy port. **Windows:** `start-bridge.ps1` works in the
+  stock PowerShell 5.1, in folders with spaces, and on non-English Windows.
+- **Codex and other agents** read the same instructions as Claude Code
+  (`AGENTS.md`).
+- **The plugin bar tells you what's going on:** the file's name, a `1/2` pill with
+  several files, a spinner while a script runs, red on an error, purple when the
+  plugin runs old code ("re-run plugin"), and blue with an **Update** button when
+  a newer Figmosha is on GitHub.
+
+**Tested hard** — ~130 tests plus a scenario fuzzer (1000 random scenarios pass
+on Windows and Linux), stress and chaos runs, attacks on the request guard, and
+`tests/live_stress.py` against your own open files. They found and fixed ~15
+bugs, among them files that could stay locked forever and a second writer
+slipping into a busy file.
 
 Full details in the [CHANGELOG](CHANGELOG.md) and
 [Multiple files & concurrency](#multiple-files--concurrency).
@@ -62,15 +86,17 @@ Each arrow carries a request out and its result back. Every open file running th
 
 ## Highlights
 
-- **One Python file** server + **one Python file** CLI, ~500 lines total. No npm. No frameworks.
-- **Custom Figma plugin**, ~250 lines (JS + HTML). Imported in dev mode — no publishing.
+- **One Python file** server + **one Python file** CLI, ~1,600 lines total. One dependency (`aiohttp`). No npm. No frameworks.
+- **Custom Figma plugin**, ~800 lines (JS + HTML). Imported in dev mode — no publishing.
 - **22 helpers** baked into the plugin runtime as `h.*` so scripts stay short and safe (`h.bF`, `h.setText`, `h.withFonts`, `h.frame`, `h.hex`, `h.sel`, `h.ck`, …).
 - **13 high-level CLI subcommands** for common ops (`doctor`, `targets`, `sel`, `tree`, `find`, `text`, `variant`, `clone`, `rm`, `icomp`, `clear`, …).
 - **`figmosha doctor`** walks the whole chain — bridge, plugin, round trip, which file is open — and names the fix at whichever link is broken.
 - **Smart error hints** in responses — when a script fails with a known-pattern error, the response includes a `hint` field telling you how to fix it.
 - **Works while Figma is minimized.** WebSocket stays alive; JavaScript keeps executing in the background.
+- **Several agents, several files** — a queue per document, bounded waits, and a timeout interlock, so concurrent agents never interleave writes in one file.
 - **Auto-reconnect** in the plugin UI — restart the server and the plugin is back within 2 s.
-- **Tested without Figma** — a fake plugin drives the real WebSocket, so the bridge's guard, timeouts and slot handover are covered by `pytest`.
+- **Tells you when to update** — re-run a plugin running old code, `git pull` when GitHub has a newer version.
+- **Tested without Figma** — fake plugins drive the real WebSocket: unit, stress, chaos and fuzz tests on Windows and Linux.
 
 ## What you can do with it
 
@@ -415,10 +441,13 @@ Currently hints cover: fills/strokes variable binding, frozen arrays, missing ma
 ## Limits / gotchas
 
 - Plugin is bound to the **Figma file it was run in**, and has to be run **once per open file** — `⌘⌥P` re-runs it in the tab you're on. A background tab keeps answering, so tabs work and separate windows aren't required.
-- The bridge keeps **one connection per open file**, and a live connection is never evicted: a same-file `hello` only replaces a connection whose socket is closed or that fails a 1s liveness ping. The same document open twice coexists; two *different* files sharing a name are refused with a `409`.
+- The bridge keeps **one connection per open file**, and a live connection is never evicted: a same-file `hello` only replaces a connection whose socket is closed or that fails a 1s liveness ping. The same document open twice coexists; two *different* files sharing a name are a `409` by name — target them by their doc id instead.
 - **Figma sync errors** ("Unable to establish connection to Figma after 10 seconds") sometimes appear when fetching nodes from non-current pages. If you need cross-page access: `await figma.loadAllPagesAsync()` first.
-- Bridge binds to `127.0.0.1` by default. For LAN access: `python bridge.py --host 0.0.0.0` (not recommended — anyone on your LAN can then run arbitrary code in your Figma).
-- Manifest changes (new permissions, etc.) require **re-importing** the plugin in Figma. `code.js` and `ui.html` changes are picked up on next Run.
+- One file runs **one script at a time**: agents sharing a file queue up, so for speed give agents different files. The queue keeps writes from interleaving, but not from conflicting — two agents changing the same node means the last write wins.
+- A loop that only awaits Figma APIs blocks its file until it ends — call `h.ck()` in it so it stops at its timeout.
+- Figma slows timers in background tabs (`setTimeout(30)` can take ~1 s there); avoid `setTimeout` pauses in scripts.
+- Bridge binds to `127.0.0.1` (and `::1`) by default. For LAN access: `python bridge.py --host 0.0.0.0` (not recommended — anyone on your LAN can then run arbitrary code in your Figma).
+- Manifest changes (new permissions, etc.) require **re-importing** the plugin in Figma. `code.js` and `ui.html` changes are picked up on next Run (automatically with Figma's *Hot reload plugin*).
 
 ## Troubleshooting
 
@@ -448,27 +477,35 @@ chain and tells you which link is broken.
 ## Project layout
 
 ```
-bridge.py              HTTP/WS server: origin guard, slot handover, error hints
+bridge.py              HTTP/WS server: routing, per-file queue, guard, version checks, error hints
 figmosha.py            CLI client and subcommands
 start-bridge.sh        background bridge start / restart / --stop (macOS / Linux / WSL)
 start-bridge.ps1       detached launcher for native Windows (-Restart / -Stop)
+requirements.txt       runtime dependency (aiohttp); requirements-dev.txt adds pytest
 plugin/
   manifest.json        Permissions + allowed origins
-  code.js              Plugin sandbox: exec + the h.* helpers
-  ui.html              WS client, auto-reconnect, status bar
+  code.js              Plugin sandbox: exec, the h.* helpers, PLUGIN_VERSION
+  ui.html              WS client, auto-reconnect, the status bar
   icon.png             128×128, for publishing to Community
 tests/
   test_bridge.py       Bridge driven by a fake plugin over a real WebSocket
-  helpers.test.js      Pure helpers against a stubbed Figma
+  test_queue.py        The per-file queue: several agents, several files
+  test_stress.py       Lost-update races, chaos, plugins dying mid-queue, big payloads
+  test_fuzz.py         Random scenarios with invariant checks, hostile input, soak
+  test_plugin_version.py   Fails if plugin/ changes without a PLUGIN_VERSION bump
+  live_stress.py       Run by hand against your real open files
+  helpers.test.js      Pure helpers against a stubbed Figma (needs Node)
+docs/                  README images
 AGENTS.md              Conventions for coding agents (Codex, Claude Code…) driving Figmosha
 CLAUDE.md              One line, `@AGENTS.md`, so Claude Code loads the same file
 CLAUDE.local.md        Your machine's paths and hosts — gitignored, never committed
+CHANGELOG.md           What changed, newest first
 README.md              This file
 ```
 
 ## Contributing / extending
 
-The plugin runtime is just `new Function("figma", "print", "h", body)`. Add helpers to `HELPERS` in `plugin/code.js`, sync the file to your plugin path, and they're available in your next `exec`.
+The plugin runtime is just `new Function("figma", "print", "h", body)`. Add helpers to `HELPERS` in `plugin/code.js`, bump `PLUGIN_VERSION` at the top of the file (`pytest tests/test_plugin_version.py` tells you what to record), re-run the plugin in Figma, and they're available in your next `exec`.
 
 To add a new CLI subcommand:
 1. Add a `cmd_<name>(args)` function in `figmosha.py` that builds JS via `json.dumps`-escaped templates
@@ -481,13 +518,14 @@ To add an error hint:
 
 ## Tests
 
-No Figma needed — a fake plugin drives the bridge over a real WebSocket:
+No Figma needed — fake plugins drive the bridge over a real WebSocket:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                    # bridge, queue, stress & chaos (lost updates, leaked locks, junk input)
-python tests/live_stress.py  # against your real open files: N agents per file, counter must match            # bridge: guard, exec round trip, timeouts, slot handover
-node tests/helpers.test.js   # pure helpers: hex maths, auto-layout ordering
+pytest -q                                   # ~130 tests: bridge, queue, stress, chaos, fuzz (40 scenarios)
+FIGMOSHA_FUZZ_SEEDS=1000 pytest -q          # the long fuzz run (~15 min)
+node tests/helpers.test.js                  # pure helpers: hex maths, auto-layout ordering (optional, needs Node)
+python tests/live_stress.py 20              # against your real open files: 20 agents per file, no lost update
 ```
 
 ## Changelog
