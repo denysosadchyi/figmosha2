@@ -27,6 +27,10 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Fixed
 
+- **A file could stay interlocked forever after a caller hung up.** If a
+  caller disconnected in the same moment its script's reply arrived, the
+  bridge marked the finished script as still running and blocked the file
+  until someone POSTed `/clear`. Found by the scenario fuzzer (seed 24).
 - **`start-bridge.sh` failed on a stock Mac.** It required tmux (not shipped
   with macOS) and `./venv/bin/python`, and gave up after 1 s. It now falls back
   to a plain background process without tmux, to `python3` without a venv,
@@ -109,6 +113,13 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Added
 
+- **Fuzz and hostile-input tests.** `tests/test_fuzz.py` runs random
+  scenarios (tabs opening and closing, agents writing, giving up, hanging up,
+  failing) and checks after each that no document ran two scripts at once and
+  nothing leaked; `FIGMOSHA_FUZZ_SEEDS=300` for a long run. Plus junk from a
+  misbehaving plugin, duplicate and late results, forged Host / Origin
+  headers, and 3000 execs that must leave no residue. The state reset moved
+  to `tests/conftest.py`, so it covers every test file.
 - **Stress and chaos tests.** `tests/test_stress.py` runs 50 concurrent
   writers through a read-modify-write race (no lost update allowed), 4 files x
   15 agents, a chaos mix of impatient, failing and hung-up callers, a plugin

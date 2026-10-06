@@ -26,18 +26,7 @@ def run(coro):
     return asyncio.run(coro)
 
 
-@pytest.fixture(autouse=True)
-def clean_state():
-    """The module keeps its state in globals; give every test a fresh one."""
-    def reset():
-        for registry in (bridge.PENDING, bridge.PLUGINS, bridge.LOCKS, bridge.ABANDONED,
-                         bridge.QUEUE):
-            registry.clear()
-        bridge.ALLOWED_HOSTS = set()
-        bridge.UPDATE = None
-    reset()
-    yield
-    reset()
+# Every test starts from a clean bridge: see clean_state in conftest.py.
 
 
 class FakePlugin:

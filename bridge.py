@@ -738,9 +738,13 @@ async def _dispatch(target_ws, conn_id, code, timeout, force, meta=None) -> web.
         try:
             result = await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.CancelledError:
-            # Client vanished mid-request (aiohttp cancels the handler). The script
-            # is still running, so the file stays interlocked.
-            _abandon(rid, conn_id, timeout, target_ws)
+            # Client vanished mid-request (aiohttp cancels the handler). If the
+            # script is still running, the file stays interlocked until it ends.
+            # But if its reply already landed in the same tick, it has ended:
+            # interlocking then would wait for a reply that will never come
+            # again, and lock the file until someone POSTs /clear.
+            if not fut.done():
+                _abandon(rid, conn_id, timeout, target_ws)
             raise
         except asyncio.TimeoutError:
             entry = PENDING.get(rid, {})
