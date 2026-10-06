@@ -487,3 +487,14 @@ def test_batched_log_lines_arrive_in_order():
             assert body["logs"] == ["a", "b", "c"] and body["result"] == "1"
         await c.close()
     run(go())
+
+
+def test_loopback_listens_on_ipv4_and_ipv6():
+    """`localhost` is ::1 first on Windows and macOS; without ::1 every client
+    saying `localhost` stalled ~2 s per request on Windows."""
+    import socket
+    hosts = bridge._bind_hosts("127.0.0.1", 0)
+    assert hosts[0] == "127.0.0.1"
+    if socket.has_ipv6:
+        assert "::1" in hosts or len(hosts) == 1  # IPv6 may be disabled on a box
+    assert bridge._bind_hosts("0.0.0.0", 0) == ["0.0.0.0"]

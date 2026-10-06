@@ -8,6 +8,9 @@ Drive Figma by sending JS code through a local bridge that's connected to a cust
 
 ## How to send code
 
+> **macOS / Linux:** there is no `python` command on a stock Mac — wherever this file says
+> `python figmosha.py`, run `./venv/bin/python figmosha.py` (or `python3 figmosha.py`).
+
 ```bash
 # Preferred — subcommand-style
 python figmosha.py exec "return figma.currentPage.name"
@@ -134,8 +137,8 @@ two agents meant to change the same node. Overlapping writers = last write wins,
 **ownership of mains / variants / variables — not by frame or screen**: a main-component or variable edit
 propagates file-wide, into frames the other writer has already verified.
 
-If the bridge isn't running: `bash start-bridge.sh` on macOS / Linux / WSL (tmux `figmosha-bridge`,
-log `/tmp/figmosha-bridge.log`), or `.\start-bridge.ps1` on native Windows (log `bridge.out.log`).
+If the bridge isn't running: `bash start-bridge.sh` on macOS / Linux / WSL (log
+`/tmp/figmosha-bridge.log`), or `.\start-bridge.ps1` on native Windows (log `bridge.out.log`).
 See [Running the bridge](#running-the-bridge).
 
 If the plugin isn't connected: tell the user — `Plugins → Development → Figmosha Bridge → Run`.
@@ -317,11 +320,14 @@ Setup, once: `python -m venv venv`, then `pip install -r requirements.txt` with 
 **macOS / Linux / WSL**
 
 ```bash
-bash start-bridge.sh                 # start or restart (kills the old tmux session first)
-tmux attach -t figmosha-bridge       # watch it
-tmux kill-session -t figmosha-bridge # stop it
-# log: /tmp/figmosha-bridge.log
+bash start-bridge.sh                 # start, or restart if already running
+bash start-bridge.sh --stop          # stop it
+tail -f /tmp/figmosha-bridge.log     # watch it (or: tmux attach -t figmosha-bridge, if tmux is installed)
 ```
+
+No tmux needed: with tmux installed it runs in a detached session `figmosha-bridge`, otherwise as a
+plain background process (stock macOS). It uses `./venv/bin/python`, else `$FIGMOSHA_PYTHON`, else
+`python3`, and waits up to 10 s for the bridge to answer.
 
 **Native Windows** — no bash or tmux needed:
 

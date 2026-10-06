@@ -27,6 +27,11 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Fixed
 
+- **`start-bridge.sh` failed on a stock Mac.** It required tmux (not shipped
+  with macOS) and `./venv/bin/python`, and gave up after 1 s. It now falls back
+  to a plain background process without tmux, to `python3` without a venv,
+  waits up to 10 s, checks `aiohttp` up front, and has `--stop`. The docs say
+  `python3` / `./venv/bin/python` on macOS, which has no `python` command.
 - **Every CLI call took ~2 s on Windows.** The CLI talked to `localhost`, which
   Windows resolves to `::1` first; the bridge only listened on `127.0.0.1`, so
   each request waited for the IPv6 attempt to fail. The bridge now also listens

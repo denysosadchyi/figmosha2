@@ -284,7 +284,7 @@ cd figmosha2
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt     # macOS / Linux / WSL
 python  -m venv venv; .\venv\Scripts\pip install -r requirements.txt   # Windows (PowerShell)
 
-bash start-bridge.sh        # detached tmux session "figmosha-bridge"
+bash start-bridge.sh        # background (tmux session if tmux is installed); --stop to stop
 .\start-bridge.ps1          # native Windows, detached
 ./venv/bin/python bridge.py # …or just keep a terminal open
 ```
@@ -315,12 +315,12 @@ Then import `C:\Users\<your-name>\figmosha-plugin\manifest.json`.
 ### Start a session
 
 ```bash
-bash start-bridge.sh     # macOS / Linux / WSL — detached tmux session
+bash start-bridge.sh     # macOS / Linux / WSL — background, tmux not required; --stop to stop
 .\start-bridge.ps1       # native Windows — detached, -Restart / -Stop too
 # In Figma: Plugins → Development → Figmosha Bridge → Run
 ```
 
-The bridge survives SSH disconnects and terminal closes (tmux). It does **not** survive OS reboot or WSL shutdown — restart it after either.
+The bridge runs in the background, so it survives closing the terminal (and SSH disconnects). It does **not** survive OS reboot or WSL shutdown — restart it after either.
 
 ### Send code
 
@@ -435,7 +435,8 @@ chain and tells you which link is broken.
 | `Cannot write to node with unloaded font` | Need to load fonts first | Use `await h.setText(...)` or wrap edits in `h.withFonts(root, fn)` |
 | `Cannot assign to read only property` | `node.fills` is frozen | Use `await h.bF(node, idx, varId)` or copy: `JSON.parse(JSON.stringify(node.fills))` |
 | `pip install aiohttp` fails on Linux | Python externally-managed environment (PEP 668) | Use the venv approach (always preferred) or `pip install --user --break-system-packages aiohttp` |
-| Tmux not installed (Windows native) | `start-bridge.sh` needs bash + tmux | Use `.\start-bridge.ps1` — same thing, detached, with `-Restart` and `-Stop` |
+| `bash` not available (Windows native) | `start-bridge.sh` is for macOS / Linux / WSL | Use `.\start-bridge.ps1` — same thing, detached, with `-Restart` and `-Stop` |
+| `python: command not found` (macOS) | A stock Mac only has `python3` | Use `./venv/bin/python figmosha.py …` or `python3 figmosha.py …` |
 | `start-bridge.ps1 cannot be loaded because running scripts is disabled` | Windows PowerShell's default execution policy | `powershell -ExecutionPolicy Bypass -File .\start-bridge.ps1`, or once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
 | `python` opens the Microsoft Store | `WindowsApps\python.exe` is a Store stub, not Python | Install from python.org with **Add to PATH** ticked, or turn the stub off in Settings → Apps → App execution aliases |
 | `curl ... -d '{"code":...}'` fails in Windows PowerShell | `curl` there is an alias for `Invoke-WebRequest` | Call `curl.exe` explicitly, or just use `python figmosha.py` |
@@ -449,7 +450,7 @@ chain and tells you which link is broken.
 ```
 bridge.py              HTTP/WS server: origin guard, slot handover, error hints
 figmosha.py            CLI client and subcommands
-start-bridge.sh        tmux-based bridge management (macOS / Linux / WSL)
+start-bridge.sh        background bridge start / restart / --stop (macOS / Linux / WSL)
 start-bridge.ps1       detached launcher for native Windows (-Restart / -Stop)
 plugin/
   manifest.json        Permissions + allowed origins
