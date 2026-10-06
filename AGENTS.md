@@ -119,8 +119,10 @@ curl -s -X POST http://localhost:8787/clear -d '{"target":"Component Library"}'
 `pending` (in-flight) and `abandoned` (`[{rid, conn, age_s}]`).
 
 - **Cooperative cancellation:** chunked sweeps should call **`h.ck()`** each iteration — it throws once
-  the bridge has given up on that run, so the loop stops instead of mutating under the next caller.
-  (Requires the plugin re-Run after 2026-08-10; harmless on older builds, which ignore `abort`.)
+  the exec's own `timeout` has passed, so the loop stops instead of mutating under the next caller.
+  It checks the plugin's clock, not a message from the bridge: a loop that only awaits Figma APIs never
+  lets the plugin read its messages, so it can't be told to stop — and it also blocks every other exec
+  on that file, `--parallel` reads included, until it ends. Without `h.ck()` such a loop simply runs on.
 - **The same file open twice is fine** (2026-08-27). Each tab/window gets its own slot; the plugin reports
   a `docSig` (hash of the page ids, since `figma.fileKey` is null for a dev plugin and `figma.root.id`
   is `"0:0"` everywhere), so the bridge can tell two **views of one document** from two **different
@@ -152,7 +154,7 @@ The plugin runtime exposes a small helper namespace. Use these to keep scripts s
 | `await h.bF(node, idx, varOrId)` | Bind fill paint to variable (id or instance) |
 | `await h.bS(node, idx, varOrId)` | Bind stroke paint to variable |
 | `await h.bN(node, prop, varOrId)` | Bind numeric prop (radius, padding, size...) |
-| `h.ck()` | Throws if the bridge abandoned this run — call it each loop iteration in a sweep |
+| `h.ck()` | Throws once this exec's timeout has passed — call it each loop iteration in a sweep |
 | `h.findByName(root, name)` | First descendant by exact name |
 | `h.findAllByName(root, name)` | All descendants by exact name |
 | `h.dumpTree(node, {maxDepth, showSize, showText, showLayout})` | Indented tree string |

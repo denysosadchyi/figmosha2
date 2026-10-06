@@ -433,16 +433,22 @@ async def plugin_ws_handler(request: web.Request):
                 continue
 
             rid = m.get("id")
-            entry = PENDING.get(rid)
-            if not entry:
-                # Late reply for a request that already timed out. The client got a
-                # 504 long ago, but the script kept running — record that it has
-                # finally finished so the interlock on this file can lift.
+            if not isinstance(rid, str):
+                continue
+            if mtype in ("result", "error"):
+                # The script has ended, so any interlock it holds lifts — whether
+                # the reply is late (client got a 504 long ago) or lands in the same
+                # tick as the timeout, while the request is still being torn down.
+                # Only a final reply counts: an orphan's `log` lines mean it is
+                # still running, and lifting the interlock on those let the next
+                # caller write alongside it.
                 orphan = ABANDONED.pop(rid, None)
-                if orphan is not None and mtype in ("result", "error"):
+                if orphan is not None:
                     late = time.time() - orphan["t0"]
                     print(f"[orphan] {rid[:8]} finished after {late:.0f}s "
                           f"({mtype}) — client already received a 504")
+            entry = PENDING.get(rid)
+            if not entry:
                 continue
 
             if mtype == "log":
@@ -452,6 +458,10 @@ async def plugin_ws_handler(request: web.Request):
                 else:
                     entry["logs"].append(m.get("text", ""))
             elif mtype in ("result", "error"):
+                # Remember the script ended even if nobody is waiting any more:
+                # the timeout may have cancelled the future a moment ago, and the
+                # request is about to be marked abandoned (see _abandon).
+                entry["finished"] = True
                 if not entry["future"].done():
                     entry["future"].set_result(m)
     finally:
@@ -705,6 +715,11 @@ def _abandon(rid, conn_id, timeout, target_ws):
     Cancellation is requested cooperatively; scripts opt in by calling h.ck().
     """
     entry = PENDING.get(rid, {})
+    if entry.get("finished"):
+        # Its reply landed between the timeout firing and this call — the
+        # script is over. Interlocking now would wait for a reply that already
+        # came, and keep the file locked until someone POSTs /clear.
+        return
     ABANDONED[rid] = {"conn": conn_id,
                       "t0": entry.get("t0", time.time()),
                       "timeout": timeout}
@@ -730,7 +745,11 @@ async def _dispatch(target_ws, conn_id, code, timeout, force, meta=None) -> web.
 
     try:
         try:
-            await target_ws.send_str(json.dumps({"id": rid, "type": "exec", "code": code}))
+            # The timeout travels with the script so h.ck() can enforce it from
+            # the plugin's own clock — see code.js: a tight loop never lets the
+            # `abort` message in.
+            await target_ws.send_str(json.dumps(
+                {"id": rid, "type": "exec", "code": code, "timeout": timeout}))
         except Exception as e:
             return web.json_response(
                 {"ok": False, "error": f"send to plugin failed: {e}"}, status=500)

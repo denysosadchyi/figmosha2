@@ -381,3 +381,78 @@ def test_unicode_names_and_agents():
             assert files[0]["name"] == "Макет 🎨 — фінал"
         await c.close()
     run(go())
+
+
+def test_orphan_log_lines_do_not_lift_the_interlock():
+    """A timed-out script that keeps printing is still running: its log lines
+    must not lift the interlock — only its final result or error may."""
+    async def go():
+        c = await make_client()
+        ws = await c.ws_connect("/plugin", headers={"Origin": "null"})
+        await ws.send_str(json.dumps({"type": "hello", "name": "A", "docSig": "docAAAAAA"}))
+        await asyncio.sleep(0.05)
+        task = asyncio.create_task(call(c, {"op": "x"}, timeout=0.2))
+        msg = json.loads((await ws.receive()).data)
+        while msg.get("type") != "exec":
+            msg = json.loads((await ws.receive()).data)
+        rid = msg["id"]
+        assert (await task).status == 504
+        await ws.send_str(json.dumps({"type": "log", "id": rid, "lines": ["still going"]}))
+        await asyncio.sleep(0.05)
+        r = await call(c, {"op": "rmw"}, timeout=1)
+        assert r.status == 409, "a log line from a running orphan lifted the interlock"
+        await ws.send_str(json.dumps({"type": "result", "id": rid, "value": "done"}))
+        await asyncio.sleep(0.05)
+        assert bridge.ABANDONED == {}
+        await ws.close()
+        await c.close()
+    run(go())
+
+
+def test_reply_racing_the_timeout_lifts_the_interlock():
+    """h.ck() stops a script right at its timeout, so its reply can land while
+    the bridge is still tearing the request down: the request is still in
+    PENDING (its future already cancelled) AND already marked abandoned. That
+    reply ends the script, so the interlock must lift. Built deterministically
+    from exactly that state, since the real race is a matter of microseconds."""
+    async def go():
+        c = await make_client()
+        ws = await c.ws_connect("/plugin", headers={"Origin": "null"})
+        await ws.send_str(json.dumps({"type": "hello", "name": "A", "docSig": "docAAAAAA"}))
+        await asyncio.sleep(0.05)
+        conn = next(iter(bridge.PLUGINS))
+        fut = asyncio.get_running_loop().create_future()
+        fut.cancel()                                   # wait_for gave up on it
+        bridge.PENDING["rid-race"] = {"future": fut, "logs": [], "t0": 0, "conn": conn}
+        bridge.ABANDONED["rid-race"] = {"conn": conn, "t0": 0, "timeout": 1}
+        await ws.send_str(json.dumps({"type": "error", "id": "rid-race", "text": "aborted"}))
+        await asyncio.sleep(0.05)
+        assert bridge.ABANDONED == {}, "finished script left the file interlocked"
+        bridge.PENDING.clear()
+        await ws.close()
+        await c.close()
+    run(go())
+
+
+def test_reply_landing_between_timeout_and_abandon_does_not_interlock():
+    """The other ordering of the same race, the one seen live: the timeout
+    cancels the future, the plugin's reply is processed (and ignored, nobody is
+    waiting), and only then does the bridge mark the run abandoned. It must
+    see the reply already came, and not interlock."""
+    async def go():
+        c = await make_client()
+        ws = await c.ws_connect("/plugin", headers={"Origin": "null"})
+        await ws.send_str(json.dumps({"type": "hello", "name": "A", "docSig": "docAAAAAA"}))
+        await asyncio.sleep(0.05)
+        conn = next(iter(bridge.PLUGINS))
+        fut = asyncio.get_running_loop().create_future()
+        fut.cancel()
+        bridge.PENDING["rid-race2"] = {"future": fut, "logs": [], "t0": 0, "conn": conn}
+        await ws.send_str(json.dumps({"type": "error", "id": "rid-race2", "text": "aborted"}))
+        await asyncio.sleep(0.05)                       # reply processed first...
+        bridge._abandon("rid-race2", conn, 1, bridge.PLUGINS[conn]["ws"])  # ...then abandon
+        assert bridge.ABANDONED == {}, "finished script left the file interlocked"
+        bridge.PENDING.clear()
+        await ws.close()
+        await c.close()
+    run(go())

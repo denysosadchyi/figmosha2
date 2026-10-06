@@ -199,7 +199,9 @@ function connect() {
     if (msg.type === "exec") {
       log(`[exec] ${shortId(msg.id)} code=${(msg.code || "").length}b`);
       execStarted(msg.id);
-      parent.postMessage({ pluginMessage: { type: "exec", id: msg.id, code: msg.code } }, "*");
+      // timeout rides along: h.ck() in code.js stops a run once it has passed.
+      parent.postMessage({ pluginMessage: {
+        type: "exec", id: msg.id, code: msg.code, timeout: msg.timeout } }, "*");
     } else if (msg.type === "ping") {
       // Liveness probe: the bridge sends this when another plugin instance
       // wants the slot. Answering keeps ours.

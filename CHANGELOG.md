@@ -27,6 +27,18 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Fixed
 
+- **`h.ck()` could not stop a tight loop.** It waited for an `abort` message
+  from the bridge, but a loop that only awaits Figma APIs never lets the plugin
+  read its messages. The exec's timeout now travels with the script and
+  `h.ck()` checks the plugin's own clock: verified live, such a loop stops at
+  its 1 s timeout instead of running on and holding the file.
+- **A finished script could leave its file interlocked until `/clear`.** When
+  its reply landed right at the timeout — which `h.ck()` now makes the normal
+  case — the bridge dropped the reply and then marked the run abandoned.
+  Both orderings of that race are handled and tested.
+- **A timed-out script's `print()` lifted the interlock** while it was still
+  running, letting the next caller write alongside it. Only its final result
+  or error lifts it now.
 - **A file could stay interlocked forever after a caller hung up.** If a
   caller disconnected in the same moment its script's reply arrived, the
   bridge marked the finished script as still running and blocked the file

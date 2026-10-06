@@ -4,7 +4,7 @@ figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 // disk and asks for a re-Run when they differ, because a running plugin keeps
 // the code it started with. Bump it on every change to plugin/ —
 // tests/test_plugin_version.py fails until you do.
-const PLUGIN_VERSION = "2026-10-06.4";
+const PLUGIN_VERSION = "2026-10-06.6";
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
@@ -419,6 +419,11 @@ figma.ui.onmessage = async (msg) => {
   }
   if (msg.type !== "exec") return;
   const { id, code } = msg;
+  // When the bridge gives up on this run. Checked by h.ck() against the
+  // sandbox's own clock, because the bridge's `abort` message can't get in
+  // while a loop only awaits Figma APIs: those promises settle as microtasks,
+  // so the plugin never returns to its message queue until the loop ends.
+  const deadline = typeof msg.timeout === "number" ? Date.now() + msg.timeout * 1000 : Infinity;
 
   const logs = [];
   // print() lines go to the bridge in batches, not one message per line: each
@@ -444,14 +449,15 @@ figma.ui.onmessage = async (msg) => {
     else if (flushTimer === null) flushTimer = setTimeout(flushLogs, 100);
   };
 
-  // Per-exec helper view: h.ck() throws once the bridge has abandoned this run,
-  // so chunked sweeps stop instead of mutating under the next caller.
+  // Per-exec helper view: h.ck() throws once the bridge has given up on this
+  // run (its timeout passed, or it sent `abort`), so chunked sweeps stop
+  // instead of mutating under the next caller.
   const h = Object.create(HELPERS);
+  h.aborted = () => ABORTED.has(id) || Date.now() > deadline;
   h.ck = () => {
-    if (ABORTED.has(id)) throw new Error("aborted: bridge stopped waiting for this script");
+    if (h.aborted()) throw new Error("aborted: past this exec's timeout — the bridge stopped waiting");
     return true;
   };
-  h.aborted = () => ABORTED.has(id);
 
   CURRENT_PRINT = print;
   try {
