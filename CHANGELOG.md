@@ -27,6 +27,17 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Fixed
 
+- **A caller hanging up mid-run let the next caller into the file beside its
+  still-running script.** The hang-up path skipped the interlock when the
+  reply future was done — but cancelling `wait_for` cancels that future, so
+  it always was. Rare on Python 3.12, constant on 3.14: found by the final
+  Linux run of the scenario fuzzer (34–39 of 300 scenarios failed).
+- **The timeout interlock was per connection, not per document**, so a caller
+  routed through another tab of the same file got past it. It now covers the
+  document, and `/clear` through any tab clears it.
+- **A hang-up while the script was being sent** could release the lock with
+  the script already on its way; the send is now always completed and the
+  run interlocked.
 - **`h.ck()` could not stop a tight loop.** It waited for an `abort` message
   from the bridge, but a loop that only awaits Figma APIs never lets the plugin
   read its messages. The exec's timeout now travels with the script and

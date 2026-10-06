@@ -42,6 +42,7 @@ class SandboxPlugin:
         # Document to several plugins to open "the same file" in several tabs.
         self.d = document or Document()
         self.ran = []          # agent tags, in the order their scripts started
+        self.scripts = set()   # running script tasks: a closing tab kills them
 
     counter = property(lambda self: self.d.counter)
     max_running = property(lambda self: self.d.max_running)
@@ -57,6 +58,9 @@ class SandboxPlugin:
 
     async def __aexit__(self, *exc):
         self._pump_task.cancel()
+        # Closing a Figma tab kills its plugin sandbox and whatever it was running.
+        for t in list(self.scripts):
+            t.cancel()
         if not self.ws.closed:
             await self.ws.close()
 
@@ -68,7 +72,9 @@ class SandboxPlugin:
             if m.get("type") == "ping":
                 await self.ws.send_str(json.dumps({"type": "pong"}))
             elif m.get("type") == "exec":
-                asyncio.create_task(self._run(m["id"], json.loads(m["code"])))
+                t = asyncio.create_task(self._run(m["id"], json.loads(m["code"])))
+                self.scripts.add(t)
+                t.add_done_callback(self.scripts.discard)
 
     async def _run(self, rid, cmd):
         d = self.d
@@ -454,5 +460,48 @@ def test_reply_landing_between_timeout_and_abandon_does_not_interlock():
         assert bridge.ABANDONED == {}, "finished script left the file interlocked"
         bridge.PENDING.clear()
         await ws.close()
+        await c.close()
+    run(go())
+
+
+def test_caller_hanging_up_mid_run_keeps_the_file_interlocked():
+    """A caller disconnects while its script runs in the plugin. The script
+    keeps running, so the next caller must get 409 — not be let in alongside
+    it. (The bug: the hang-up check used fut.done(), which cancelling wait_for
+    always makes true, so the lock was released mid-run.)"""
+    async def go():
+        c = await make_client()
+        async with SandboxPlugin(c, "A", "docAAAAAA") as p:
+            first = asyncio.create_task(call(c, {"op": "sleep", "s": 0.5}, timeout=5))
+            await asyncio.sleep(0.1)                 # the script is running now
+            first.cancel()
+            await asyncio.gather(first, return_exceptions=True)
+            await asyncio.sleep(0.05)
+            r = await call(c, {"op": "rmw", "pause": 0}, timeout=2, queue_timeout=0.2)
+            assert r.status in (409, 503), "next caller got in while the script still ran"
+            assert p.max_running == 1
+            await asyncio.sleep(0.6)                 # the orphan finishes...
+            await assert_file_is_free(c, "A")        # ...and the file frees itself
+        await c.close()
+    run(go())
+
+
+def test_interlock_covers_every_tab_of_the_document():
+    """A script times out in one tab; a caller routed through ANOTHER tab of the
+    same document must be interlocked too — it would write into the same file
+    the orphan is still changing."""
+    async def go():
+        c = await make_client()
+        doc = Document()
+        async with SandboxPlugin(c, "A", "docAAAAAA", doc) as tab1, \
+                   SandboxPlugin(c, "A", "docAAAAAA", doc) as tab2:
+            conns = [f["conn"] for f in (await (await c.get("/targets")).json())["files"]]
+            r = await call(c, {"op": "sleep", "s": 0.6}, target=conns[0], timeout=0.2)
+            assert r.status == 504
+            r = await call(c, {"op": "rmw", "pause": 0}, target=conns[1], timeout=1)
+            assert r.status == 409, "the other tab let a writer in beside the orphan"
+            assert doc.max_running == 1
+            r = await c.post("/clear", json={"target": conns[1]})   # clear via either tab
+            assert (await r.json())["cleared"]
         await c.close()
     run(go())

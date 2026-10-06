@@ -720,7 +720,10 @@ def _abandon(rid, conn_id, timeout, target_ws):
         # script is over. Interlocking now would wait for a reply that already
         # came, and keep the file locked until someone POSTs /clear.
         return
+    # "doc": the interlock covers the document, like the lock — the next caller
+    # may be routed through another tab on the same file.
     ABANDONED[rid] = {"conn": conn_id,
+                      "doc": _doc_key(conn_id),
                       "t0": entry.get("t0", time.time()),
                       "timeout": timeout}
     asyncio.get_running_loop().create_task(_send_abort(target_ws, rid))
@@ -728,7 +731,10 @@ def _abandon(rid, conn_id, timeout, target_ws):
 
 async def _dispatch(target_ws, conn_id, code, timeout, force, meta=None) -> web.Response:
     """Send one exec to a plugin and await its reply. Caller holds the lock."""
-    stale = [r for r, o in ABANDONED.items() if o.get("conn") == conn_id]
+    # Per document, not per connection: a timed-out script in one tab still
+    # runs in the document a caller routed through another tab would write to.
+    doc = _doc_key(conn_id)
+    stale = [r for r, o in ABANDONED.items() if o.get("doc", o.get("conn")) == doc]
     if stale and not force:
         return web.json_response({
             "ok": False,
@@ -748,8 +754,28 @@ async def _dispatch(target_ws, conn_id, code, timeout, force, meta=None) -> web.
             # The timeout travels with the script so h.ck() can enforce it from
             # the plugin's own clock — see code.js: a tight loop never lets the
             # `abort` message in.
-            await target_ws.send_str(json.dumps(
-                {"id": rid, "type": "exec", "code": code, "timeout": timeout}))
+            #
+            # Shielded: if the caller hangs up while this frame is being written,
+            # cancelling the write midway leaves it unknown whether the plugin got
+            # the script — and the lock would be released while it may be running,
+            # letting the next caller in alongside it (seen on Linux, where the
+            # write awaits the socket). So the send always completes, and a caller
+            # cancelled here is treated like any caller that left mid-run.
+            send = asyncio.ensure_future(target_ws.send_str(json.dumps(
+                {"id": rid, "type": "exec", "code": code, "timeout": timeout})))
+            try:
+                await asyncio.shield(send)
+            except asyncio.CancelledError:
+                try:
+                    await send
+                    delivered = True
+                except Exception:
+                    delivered = False  # the send itself failed: nothing to wait for
+                if delivered:
+                    _abandon(rid, conn_id, timeout, target_ws)
+                raise
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             return web.json_response(
                 {"ok": False, "error": f"send to plugin failed: {e}"}, status=500)
@@ -758,12 +784,12 @@ async def _dispatch(target_ws, conn_id, code, timeout, force, meta=None) -> web.
             result = await asyncio.wait_for(fut, timeout=timeout)
         except asyncio.CancelledError:
             # Client vanished mid-request (aiohttp cancels the handler). If the
-            # script is still running, the file stays interlocked until it ends.
-            # But if its reply already landed in the same tick, it has ended:
-            # interlocking then would wait for a reply that will never come
-            # again, and lock the file until someone POSTs /clear.
-            if not fut.done():
-                _abandon(rid, conn_id, timeout, target_ws)
+            # script is still running, the file stays interlocked until it ends;
+            # _abandon skips that when its reply already landed (entry
+            # "finished"). Not `fut.done()`: cancelling wait_for cancels fut
+            # too, so it is always done here — which released the lock while
+            # the script ran on, and let the next caller in alongside it.
+            _abandon(rid, conn_id, timeout, target_ws)
             raise
         except asyncio.TimeoutError:
             entry = PENDING.get(rid, {})
@@ -921,7 +947,8 @@ async def clear_handler(request: web.Request) -> web.Response:
         return web.json_response({"ok": False, "error": info},
                                  status=503 if no_plugins else 409)
 
-    dropped = [r for r, o in list(ABANDONED.items()) if o.get("conn") == conn_id]
+    doc = _doc_key(conn_id)
+    dropped = [r for r, o in list(ABANDONED.items()) if o.get("doc", o.get("conn")) == doc]
     for r in dropped:
         ABANDONED.pop(r, None)
     return web.json_response({"ok": True, "cleared": [r[:8] for r in dropped],
