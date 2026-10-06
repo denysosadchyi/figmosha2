@@ -503,9 +503,13 @@ def resolve_target(target):
                       f"Connected: {names}")
 
     t = target.lower()
-    # 0. a connection id (or its first 6+ characters, as `targets` prints 8) —
-    #    the way to pick one of two different files that share a name.
+    # 0. a document id (stable: stored in the file) or a connection id (changes
+    #    on every reconnect), 6+ characters — the way to pick one of two
+    #    different files that share a name.
     if len(t) >= 6:
+        by_doc = [(cid, i) for cid, i in live if (i.get("docSig") or "").lower().startswith(t)]
+        if by_doc and len({i.get("docSig") for _, i in by_doc}) == 1:
+            return by_doc[-1]  # one document; newest view if open in several tabs
         by_conn = [(cid, i) for cid, i in live if cid.startswith(t)]
         if len(by_conn) == 1:
             return by_conn[0]
@@ -527,8 +531,8 @@ def resolve_target(target):
         conns = ", ".join(c[:8] for c, _ in exact)
         return None, (f"{len(exact)} connected files are named {target!r} "
                       f"(conns: {conns}) — different documents sharing a name. "
-                      f"Pick one by its conn id, e.g. -T {exact[0][0][:8]}, or rename one "
-                      f"of the files")
+                      f"Pick one by its document id from `figmosha targets`, e.g. "
+                      f"-T {exact[0][1].get('docSig') or exact[0][0][:8]}, or rename one of the files")
     # 2. exact fileKey
     for cid, i in live:
         if i.get("fileKey") == target:
@@ -770,6 +774,7 @@ def _files_payload():
     for cid, i in live:
         key = (i.get("name"), i.get("docSig"))
         entry = {"name": i.get("name"), "fileKey": i.get("fileKey"), "conn": cid[:8],
+                 "doc": i.get("docSig"),
                  "plugin": i.get("pluginVersion"), "outdated": plugin_outdated(i)}
         q = QUEUE.get(_doc_key(cid)) or {}
         running = q.get("running")

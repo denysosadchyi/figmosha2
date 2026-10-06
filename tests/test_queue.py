@@ -109,12 +109,12 @@ def test_two_tabs_on_one_document_share_one_queue():
 
 def test_same_named_files_are_reachable_by_conn_id():
     """Two different files both called 'Untitled': the name is ambiguous (409
-    that suggests a conn id), the conn id picks exactly one."""
+    that suggests an id), and either the document id or the conn id picks one."""
     async def go():
         c = await make_client()
         async with FakePlugin(c) as a, FakePlugin(c) as b:
-            await hello(a, "Untitled", "doc-1")
-            await hello(b, "Untitled", "doc-2")
+            await hello(a, "Untitled", "dk2m9first")
+            await hello(b, "Untitled", "dk2m9second")
             r = await post(c, code="x", target="Untitled")
             assert r.status == 409 and "-T " in (await r.json())["error"]
 
@@ -123,6 +123,10 @@ def test_same_named_files_are_reachable_by_conn_id():
                 r = await post(c, code=f"to {conn}", target=conn)
                 assert r.status == 200
             assert len(a.seen_codes) == 1 and len(b.seen_codes) == 1
+
+            # The document id survives reconnects, so it is the one to keep.
+            r = await post(c, code="by doc", target="dk2m9s")
+            assert r.status == 200 and b.seen_codes[-1] == "by doc"
         await c.close()
     run(go())
 

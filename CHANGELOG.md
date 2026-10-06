@@ -90,8 +90,9 @@ code it started with, so new helpers won't exist until you do. If
   `FIGMOSHA_AGENT` / `"agent"`, replies carry `queued_ms`, and
   `--queue-timeout` / `"queue_timeout"` caps the wait with a `503 file busy`
   that guarantees nothing ran.
-- **`-T` takes a connection id**, so two different files with the same name
-  (two fresh "Untitled" files) can each be targeted.
+- **`-T` takes a document id**, shown by `targets` and stored in the file so it
+  survives reconnects, so two different files with the same name (two fresh
+  "Untitled" files) can each be targeted. A connection id works too.
 - **"New version" with an Update button.** The bridge asks GitHub every 6
   hours how many commits this checkout is behind `master`. When there are new
   ones, the plugin bar turns blue with "New version" and a white **Update**

@@ -4,7 +4,7 @@ figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 // disk and asks for a re-Run when they differ, because a running plugin keeps
 // the code it started with. Bump it on every change to plugin/ —
 // tests/test_plugin_version.py fails until you do.
-const PLUGIN_VERSION = "2026-10-06.1";
+const PLUGIN_VERSION = "2026-10-06.2";
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
@@ -33,7 +33,8 @@ function docSignature() {
   try {
     let id = figma.root.getPluginData("figmosha-doc");
     if (!id) {
-      id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      // Random part first, so a short prefix (-T dk2m9q) is already unique.
+      id = "d" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
       figma.root.setPluginData("figmosha-doc", id);
     }
     return id;

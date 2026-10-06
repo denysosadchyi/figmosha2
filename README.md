@@ -160,13 +160,14 @@ and with two or more files connected a `1/2 ✓` pill says which window this is
 and how many are open.
 
 ```bash
-python figmosha.py targets                          # name / fileKey / conn / queue per file
+python figmosha.py targets                          # name / doc id / fileKey / conn / queue
 python figmosha.py exec "return figma.root.name" -T "Component Library"
 curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Component Library"}'
 ```
 
-Target resolution: connection id (`conn` in `targets`) → exact file name
-(case-insensitive) → exact `fileKey` → unambiguous substring of the name.
+Target resolution: document id (`doc` in `targets`) → connection id → exact
+file name (case-insensitive) → exact `fileKey` → unambiguous substring of the
+name.
 
 - No target with exactly one file connected routes there — the old behavior.
 - No target with two or more connected is `409` ("N files connected — specify a
@@ -176,9 +177,9 @@ Target resolution: connection id (`conn` in `targets`) → exact file name
   document, so the caller cannot end up in "the other copy"; `/status` flags the
   extra views with `sameDocAs`.
 - **Two different files that happen to share a name** (two fresh "Untitled"
-  files) are never guessed: the name is a `409` that lists both connections, and
-  `-T <conn>` picks one. The bridge tells them apart by a document id the plugin
-  stores in each file's plugin data the first time it runs there —
+  files) are never guessed: the name is a `409`, and `-T <doc id>` picks one.
+  The bridge tells them apart by a document id the plugin stores in each file's
+  plugin data the first time it runs there, so it survives reconnects —
   `figma.fileKey` is null for a local dev plugin, `figma.root.id` is `"0:0"`
   everywhere, and page ids don't work either: every new file starts with page
   `0:1`.
@@ -200,7 +201,7 @@ another writer land in the gap.
 export FIGMOSHA_AGENT=designer                      # name shown in the queue (or --agent)
 python figmosha.py exec --file build.js -T Icons --queue-timeout 30
 python figmosha.py targets
-# Icons   -   3a2a5647   busy: designer 4s, waiting: copywriter, qa
+# Icons   dk2m9q4xmuwk   -   3a2a5647   busy: designer 4s, waiting: copywriter, qa
 ```
 
 - `--queue-timeout` (`queue_timeout`, default = the exec's `timeout`) caps the

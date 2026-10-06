@@ -34,7 +34,7 @@ curl -s http://localhost:8787/status   # {"plugin_connected": ..., "files": [...
 The bridge holds **one connection per open Figma file** that is running the plugin, not one globally.
 
 ```bash
-python figmosha.py targets                      # name / fileKey / conn / queue (busy: who, waiting: who)
+python figmosha.py targets                      # name / doc id / fileKey / conn / queue (busy, waiting)
 curl -s http://localhost:8787/targets
 
 # -T is a per-subcommand flag — it goes AFTER the subcommand, never before it
@@ -43,12 +43,14 @@ python figmosha.py tree 123:456 -T "Component Library"
 curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Icons"}'
 ```
 
-`target` matching (`resolve_target` in `bridge.py`): connection id (the `conn` column, 6+ chars) →
-exact file name (case-insensitive) → exact `fileKey` → unambiguous substring of the name.
+`target` matching (`resolve_target` in `bridge.py`): document id (the `doc` column, 6+ chars) →
+connection id → exact file name (case-insensitive) → exact `fileKey` → unambiguous substring of the name.
 
 - **Two different files with the same name** (two fresh "Untitled" files, say) → the name is a 409;
-  target each by its `conn` id: `-T 3a2a5647`. Each file carries its own id (plugin data
-  `figmosha-doc` on the document root, written once on first run), so the bridge never mixes them up.
+  target each by its **document id**: `-T dk2m9q4x`. Each file carries its own id (plugin data
+  `figmosha-doc` on the document root, written once on first run), so the bridge never mixes them up,
+  and the id survives reconnects and bridge restarts. The `conn` id changes on every reconnect — don't
+  store it.
 
 - The name is `figma.root.name` as the plugin reports it, which is often not the name you remember —
   a trailing plural, a rename that never propagated. **Verify with `targets`, don't assume.**

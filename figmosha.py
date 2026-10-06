@@ -165,7 +165,8 @@ def cmd_targets(args):
         if q.get("waiting"):
             busy += f", waiting: {', '.join(q['waiting'])}"
         same = f"\tsame document as {f['sameDocAs']}" if f.get("sameDocAs") else ""
-        print(f"{name}\t{key}\t{f.get('conn')}\t{busy}{same}")
+        # doc is stable (stored in the file) — that's the id to use with -T.
+        print(f"{name}\t{f.get('doc') or '-'}\t{key}\t{f.get('conn')}\t{busy}{same}")
     return 0
 
 
