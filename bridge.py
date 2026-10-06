@@ -22,7 +22,6 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 import uuid
@@ -87,69 +86,66 @@ def bridge_outdated() -> bool:
     return _file_digest(Path(__file__).resolve()) != BRIDGE_DIGEST
 
 
-# ─── update check against GitHub ──────────────────────────────────────────
+# ─── update check against GitHub releases ─────────────────────────────────
 # The checks above catch code that is older than this checkout. This one asks
-# whether the checkout itself is behind GitHub, so the plugin bar can offer an
-# Update button. It never blocks anything and stays silent on any failure.
-# Set FIGMOSHA_NO_UPDATE_CHECK=1 to turn it off.
+# whether a newer Figmosha has been RELEASED — a `vX.Y.Z` tag on GitHub — so
+# the plugin bar can offer an Update button. Releases, not commits: a README
+# typo pushed to master is not a new version. It never blocks anything and
+# stays silent on any failure. Set FIGMOSHA_NO_UPDATE_CHECK=1 to turn it off.
+#
+# Releasing (see AGENTS.md → Releasing): bump VERSION here, move CHANGELOG's
+# "Unreleased" under the new version, tag vX.Y.Z and push the tag.
 
+VERSION = "2.3.0"
 REPO = "denysosadchyi/figmosha2"
-BRANCH = "master"
-UPDATE_URL = f"https://github.com/{REPO}/blob/{BRANCH}/CHANGELOG.md"
 UPDATE_EVERY = 6 * 60 * 60   # seconds between checks
-UPDATE: dict | None = None   # {"behind": n, "url": ...} once GitHub has newer commits
+UPDATE: dict | None = None   # {"latest", "current", "url"} once a newer release exists
+_SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 
 
-def _local_commit():
-    """HEAD of this checkout, or None (zip download, no git, detached oddity)."""
-    try:
-        out = subprocess.run(["git", "-C", str(HERE), "rev-parse", "HEAD"],
-                             capture_output=True, text=True, timeout=5)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    sha = out.stdout.strip()
-    return sha if out.returncode == 0 and len(sha) == 40 else None
+def parse_version(tag):
+    """'v2.3.0' / '2.3.0' -> (2, 3, 0); anything else (pre-releases too) -> None."""
+    m = _SEMVER.match(str(tag).strip())
+    return tuple(int(x) for x in m.groups()) if m else None
 
 
-def commits_behind(compare: dict):
-    """How many commits GitHub has that this checkout lacks, from /compare.
+def newest_release(tags):
+    """The highest x.y.z among GitHub tag names, as its string, or None."""
+    versions = [(v, t) for t in tags if (v := parse_version(t))]
+    return max(versions)[1].lstrip("v") if versions else None
 
-    The request is `compare/<local>...<branch>`, so GitHub describes the branch
-    relative to us: "ahead" / "diverged" with `ahead_by` = commits we lack.
-    """
-    if compare.get("status") in ("ahead", "diverged"):
-        return int(compare.get("ahead_by") or 0)
-    return 0
+
+def release_url(version):
+    return f"https://github.com/{REPO}/releases/tag/v{version}"
 
 
 async def check_for_update():
-    """Ask GitHub how far behind this checkout is; returns behind count or None."""
-    sha = await asyncio.get_running_loop().run_in_executor(None, _local_commit)
-    if not sha:
-        return None
-    url = f"https://api.github.com/repos/{REPO}/compare/{sha}...{BRANCH}"
+    """The newest released version on GitHub, or None if it can't be told."""
+    url = f"https://api.github.com/repos/{REPO}/tags?per_page=100"
     headers = {"Accept": "application/vnd.github+json", "User-Agent": "figmosha-bridge"}
     try:
         timeout = aiohttp.ClientTimeout(total=10)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url, headers=headers) as r:
-                # 404: HEAD is a local commit GitHub has never seen — not our call.
                 if r.status != 200:
                     return None
-                return commits_behind(await r.json())
+                return newest_release(t.get("name") for t in await r.json())
     except Exception:
         return None
 
 
-async def set_update(behind):
-    """Record the result and tell every plugin when it changes."""
+async def set_update(latest):
+    """Record the newest release and tell every plugin when it changes."""
     global UPDATE
-    new = {"behind": behind, "url": UPDATE_URL} if behind else None
+    newer = latest and parse_version(latest) and parse_version(latest) > parse_version(VERSION)
+    new = ({"latest": latest, "current": VERSION, "url": release_url(latest)}
+           if newer else None)
     if new == UPDATE:
         return
     UPDATE = new
     if new:
-        print(f"[update] {behind} new commit(s) on GitHub — git pull to update")
+        print(f"[update] Figmosha {latest} is released (this is {VERSION}) — "
+              f"git pull, restart the bridge, re-run the plugin")
     for _, info in _live_plugins():
         await _send_update(info["ws"])
 
@@ -166,9 +162,9 @@ async def _send_update(ws):
 async def _update_loop(app):
     await asyncio.sleep(5)  # let the plugins reconnect first
     while True:
-        behind = await check_for_update()
-        if behind is not None:
-            await set_update(behind)
+        latest = await check_for_update()
+        if latest is not None:
+            await set_update(latest)
         await asyncio.sleep(UPDATE_EVERY)
 
 
@@ -872,7 +868,7 @@ def _version_notice(info):
                      f"{expected_plugin_version()}) — re-run it in Figma: "
                      f"Plugins → Development → Figmosha Bridge")
     if UPDATE:
-        parts.append(f"a newer Figmosha is on GitHub ({UPDATE['behind']} commit(s)) — "
+        parts.append(f"Figmosha {UPDATE['latest']} is released (this is {VERSION}) — "
                      f"git pull, then restart the bridge and re-run the plugin")
     if bridge_outdated():
         parts.append("bridge.py changed since the bridge started — restart it "
@@ -913,6 +909,7 @@ async def status_handler(request: web.Request) -> web.Response:
 
     files = _files_payload()
     return web.json_response({
+        "version": VERSION,
         "plugin_connected": len(files) > 0,
         "plugin_version": expected_plugin_version(),
         "bridge_outdated": bridge_outdated(),

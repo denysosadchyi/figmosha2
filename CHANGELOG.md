@@ -10,6 +10,8 @@ code it started with, so new helpers won't exist until you do. If
 
 ## [Unreleased]
 
+## [2.3.0] — 2026-10-06
+
 ### Changed
 
 - **The plugin bar names its file.** Once connected it shows the Figma file's
@@ -157,13 +159,15 @@ code it started with, so new helpers won't exist until you do. If
 - **`-T` takes a document id**, shown by `targets` and stored in the file so it
   survives reconnects, so two different files with the same name (two fresh
   "Untitled" files) can each be targeted. A connection id works too.
-- **"New version" with an Update button.** The bridge asks GitHub every 6
-  hours how many commits this checkout is behind `master`. When there are new
-  ones, the plugin bar turns blue with "New version" and a white **Update**
-  button that opens the CHANGELOG on GitHub; `/status` has an `update` field,
-  `/exec` replies carry a `notice` and `figmosha doctor` says to `git pull`.
-  It stays silent when GitHub can't be reached or `HEAD` is a local commit, and
-  `FIGMOSHA_NO_UPDATE_CHECK=1` turns it off.
+- **Releases, and an Update button when one is out.** Figmosha now has a
+  `VERSION` (in `bridge.py`, shown by `/status` and `doctor`) and is released as
+  `vX.Y.Z` tags. Every 6 hours the bridge reads the release tags on GitHub; when
+  a newer one exists the plugin bar turns blue with "New version X.Y.Z" and an
+  **Update** button that opens that release's notes, `/status` has
+  `update: {latest, current, url}`, `/exec` replies carry a `notice` and
+  `doctor` says to `git pull`. A plain commit to `master` is not offered as an
+  update. Silent when GitHub can't be reached; `FIGMOSHA_NO_UPDATE_CHECK=1`
+  turns it off.
 - **Figmosha asks you to update a stale plugin.** `plugin/code.js` carries a
   `PLUGIN_VERSION` build id that the plugin reports on connect. When it differs
   from the file on disk — after a `git pull`, say — the plugin bar turns purple

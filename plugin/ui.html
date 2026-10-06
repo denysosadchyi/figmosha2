@@ -26,7 +26,7 @@
   /* The bridge has newer plugin code on disk than this window is running. */
   body.outdated { background: #7b61ff; }
   body.multi.outdated #badge { color: #7b61ff; }
-  /* GitHub has a newer Figmosha than this checkout: "New version" + Update. */
+  /* A newer Figmosha release is out: "New version 2.4.0" + Update. */
   body.update { background: #0d99ff; }
   #update {
     display: none; flex: none; order: 3; margin-left: auto;
@@ -124,7 +124,7 @@ function render() {
   // Re-run beats Update: a stale plugin has to be re-run before anything else.
   const offer = state === "ok" && !busy && !failed && !stale && update !== null;
   statusEl.textContent = stale ? "New version: re-run plugin"
-    : offer ? "New version" : statusText;
+    : offer ? `New version ${update.latest || ""}`.trim() : statusText;
   iconEl.innerHTML = ICONS[busy || stale ? "pending" : failed ? "err" : state] || "";
   document.body.className = (failed ? "err" : stale ? "ok outdated" : offer ? "ok update" : state)
     + (multi ? " multi" : "") + (busy ? " busy" : "");
@@ -210,8 +210,9 @@ function connect() {
       // The bridge gave up on this run; code.js marks it so h.ck() throws.
       parent.postMessage({ pluginMessage: { type: "abort", id: msg.id } }, "*");
     } else if (msg.type === "update") {
-      update = { behind: msg.behind, url: msg.url };
-      updateEl.title = `${msg.behind} new commit(s) on GitHub`;
+      // A newer release (vX.Y.Z tag) than the bridge's VERSION; url = its release page.
+      update = { latest: msg.latest, url: msg.url };
+      updateEl.title = `Figmosha ${msg.latest} is out (this is ${msg.current}) — open the release notes`;
       render();
     } else if (msg.type === "outdated") {
       outdated = true;

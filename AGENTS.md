@@ -370,8 +370,32 @@ carries a `notice` (the CLI prints it as `⚠`), `/status` flags the file with `
 plugin bar turns purple with "New version: re-run plugin", and `figmosha doctor` names the fix. Tell
 the user — don't keep working against old code.
 
-**Newer Figmosha on GitHub.** Every 6 hours the bridge asks GitHub how far this checkout is behind
-`master`. If it is, `/status` has `update: {behind, url}`, `/exec` replies carry a `notice`, the plugin
-bar shows "New version" with an Update button (opens the CHANGELOG), and `doctor` prints a `!` line.
-Mention it to the user once; updating is `git pull`, restart the bridge, re-run the plugin. Off with
-`FIGMOSHA_NO_UPDATE_CHECK=1`.
+**Newer Figmosha released.** Every 6 hours the bridge reads the `vX.Y.Z` release tags on GitHub. If one
+is newer than its `VERSION`, `/status` has `update: {latest, current, url}`, `/exec` replies carry a
+`notice`, the plugin bar shows "New version X.Y.Z" with an Update button (opens the release notes), and
+`doctor` prints a `!` line. Mention it to the user once; updating is `git pull`, restart the bridge,
+re-run the plugin. Off with `FIGMOSHA_NO_UPDATE_CHECK=1`.
+
+## Releasing — every update ships as a release
+
+**Changes reach users only through releases, so every push of user-facing changes to `master` is
+released.** Users are offered an update when a newer `vX.Y.Z` tag exists — not for plain commits — so an
+unreleased change is invisible to them. Releasing is part of finishing the work, not a separate request:
+
+1. **Pick the version** (semver over the HTTP contract and the `h.*` helpers): `x.y.Z+1` for fixes,
+   `x.Y+1.0` for new features or behavior, `X+1.0.0` for anything that breaks existing scripts.
+2. **`bridge.py`**: set `VERSION = "x.y.z"`.
+3. **`CHANGELOG.md`**: rename `## [Unreleased]` to `## [x.y.z] — YYYY-MM-DD` and put a fresh empty
+   `## [Unreleased]` above it. (Log changes under `Unreleased` as you make them.)
+4. **Test**: `pytest -q` — it also checks that `VERSION` has its CHANGELOG section.
+5. **Commit, tag, push both**:
+   ```bash
+   git commit -am "Release x.y.z"
+   git tag -a vx.y.z -m "Figmosha x.y.z"
+   git push origin master vx.y.z
+   ```
+6. **GitHub release page** for the tag, with that version's CHANGELOG section as its notes (the Update
+   button links to it). Create it in the GitHub UI or via the API; the tag alone is enough for the bridge
+   to offer the update.
+
+Docs-only or test-only changes (README, comments, tests) don't need a release.

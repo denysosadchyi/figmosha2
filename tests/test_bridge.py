@@ -242,39 +242,56 @@ def test_outdated_plugin_is_told_to_rerun():
     run(go())
 
 
-def test_update_on_github_is_offered_to_plugins():
-    """When GitHub has newer commits, connected plugins get an `update` message
-    (the bar shows "New version" + Update), a plugin connecting later gets it at
-    hello, /status reports it and exec replies carry a notice."""
+def test_new_release_is_offered_to_plugins():
+    """When a newer vX.Y.Z is released, connected plugins get an `update`
+    message (the bar shows "New version X.Y.Z" + Update to the release page),
+    a plugin connecting later gets it at hello, /status reports it and exec
+    replies carry a notice. The same or an older release offers nothing."""
     async def go():
         c = await make_client()
+        major, minor, patch = bridge.parse_version(bridge.VERSION)
+        newer = f"{major}.{minor + 1}.0"
         async with FakePlugin(c) as early:
-            await bridge.set_update(4)
+            await bridge.set_update(newer)
             await asyncio.sleep(0.05)
             msg = [m for m in early.received if m["type"] == "update"][-1]
-            assert msg["behind"] == 4 and msg["url"].startswith("https://github.com/")
+            assert msg["latest"] == newer and msg["current"] == bridge.VERSION
+            assert msg["url"].endswith(f"/releases/tag/v{newer}")
 
             async with FakePlugin(c) as late:
                 assert any(m["type"] == "update" for m in late.received)
 
-            assert (await (await c.get("/status")).json())["update"]["behind"] == 4
+            status = await (await c.get("/status")).json()
+            assert status["update"]["latest"] == newer and status["version"] == bridge.VERSION
             r = await c.post("/exec", json={"code": "return 1"})
             assert "git pull" in (await r.json())["notice"]
 
-            await bridge.set_update(0)
-            assert (await (await c.get("/status")).json())["update"] is None
+            for not_newer in (bridge.VERSION, "0.9.0"):
+                await bridge.set_update(not_newer)
+                assert (await (await c.get("/status")).json())["update"] is None
         await c.close()
     run(go())
 
 
-@pytest.mark.parametrize("compare, behind", [
-    ({"status": "identical", "ahead_by": 0}, 0),
-    ({"status": "ahead", "ahead_by": 3}, 3),        # GitHub has 3 we lack
-    ({"status": "behind", "behind_by": 2}, 0),      # we are ahead: nothing to pull
-    ({"status": "diverged", "ahead_by": 1, "behind_by": 5}, 1),
+@pytest.mark.parametrize("tags, newest", [
+    (["v2.1.0", "v2.2.0", "v2.3.0"], "2.3.0"),
+    (["v2.10.0", "v2.9.9"], "2.10.0"),             # numeric, not alphabetical
+    (["v3.0.0-rc1", "v2.4.0", "nightly"], "2.4.0"),  # pre-releases and junk ignored
+    ([], None),
 ])
-def test_commits_behind(compare, behind):
-    assert bridge.commits_behind(compare) == behind
+def test_newest_release_from_tags(tags, newest):
+    assert bridge.newest_release(tags) == newest
+
+
+def test_version_is_valid_and_matches_the_changelog():
+    """VERSION must be x.y.z and have its own CHANGELOG section — the release
+    checklist in AGENTS.md: bump both together."""
+    import re
+    from pathlib import Path
+    assert bridge.parse_version(bridge.VERSION), bridge.VERSION
+    changelog = (Path(bridge.__file__).parent / "CHANGELOG.md").read_text(encoding="utf-8")
+    section = re.search(rf"^## \[{re.escape(bridge.VERSION)}\]", changelog, re.M)
+    assert section, f"CHANGELOG.md has no '## [{bridge.VERSION}]' section"
 
 
 def test_peers_counts_only_files_that_said_hello():

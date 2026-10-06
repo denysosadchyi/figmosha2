@@ -207,7 +207,8 @@ def cmd_doctor(args):
         fail(f"bridge refused the request: {resp.get('error')}",
              "a proxy is rewriting Host/Origin — talk to the bridge directly")
         return 1
-    ok(f"bridge answering on {HOST}:{PORT}")
+    ok(f"bridge answering on {HOST}:{PORT}"
+       + (f" — Figmosha {resp['version']}" if resp.get("version") else ""))
     stale = False
     if resp.get("bridge_outdated"):
         stale = True
@@ -232,7 +233,7 @@ def cmd_doctor(args):
     update = resp.get("update")
     if update:
         # Not a failure — everything works, there is just something newer.
-        print(f"  !  a newer Figmosha is on GitHub ({update.get('behind')} commit(s))")
+        print(f"  !  Figmosha {update.get('latest')} is released (this is {update.get('current')})")
         print(f"     → git pull, restart the bridge, re-run the plugin   ({update.get('url')})")
 
     status, r = _exec("return 1 + 1;", 10)

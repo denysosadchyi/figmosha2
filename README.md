@@ -40,8 +40,11 @@ Fast enough to feel synchronous: a round trip is ~2 ms over HTTP (~100 ms throug
   (`AGENTS.md`).
 - **The plugin bar tells you what's going on:** the file's name, a `1/2` pill with
   several files, a spinner while a script runs, red on an error, purple when the
-  plugin runs old code ("re-run plugin"), and blue with an **Update** button when
-  a newer Figmosha is on GitHub.
+  plugin runs old code ("re-run plugin"), and blue with "New version 2.4.0" and an
+  **Update** button when a newer release is out.
+- **Proper releases.** Figmosha is versioned (`VERSION`, shown by `doctor` and
+  `/status`) and released as `vX.Y.Z` tags with notes; you're offered an update
+  for a release, never for a stray commit to `master`.
 
 **Tested hard** — ~130 tests plus a scenario fuzzer (1000 random scenarios pass
 on Windows and Linux), stress and chaos runs, attacks on the request guard, and
@@ -156,7 +159,7 @@ authentication beyond being on the machine.
 | Endpoint | Body | Returns |
 |---|---|---|
 | `POST /exec` | `{code, timeout?, target?, parallel?, agent?, queue_timeout?}` | `{ok, result, value, logs, elapsed_ms, notice?}` — `notice` when the plugin or bridge runs stale code |
-| `GET /status` | — | `{plugin_connected, plugin_version, bridge_outdated, update, files, pending, abandoned}` — each file has `plugin` and `outdated`; `update` is `{behind, url}` when GitHub has newer commits |
+| `GET /status` | — | `{version, plugin_connected, plugin_version, bridge_outdated, update, files, pending, abandoned}` — each file has `plugin` and `outdated`; `update` is `{latest, current, url}` when a newer release is out |
 | `GET /targets` | — | `{files: [{name, fileKey, conn}]}` — connected Figma files |
 | `POST /clear` | `{target?, force?}` | drops a file's abandoned-script interlock |
 | `GET /` | — | service banner listing the endpoints |
@@ -272,9 +275,9 @@ Two checks handle it:
 unknowable. The bridge says so loudly at startup. Don't do it on a network you
 share.
 
-The bridge makes one outgoing request of its own: every 6 hours it asks the
-GitHub API how many commits your checkout is behind `master` (it sends the
-commit id, nothing else), so the plugin bar can offer an update. Set
+The bridge makes one outgoing request of its own: every 6 hours it reads the
+list of release tags from the GitHub API (it sends nothing about you or your
+files), so the plugin bar can offer an update. Set
 `FIGMOSHA_NO_UPDATE_CHECK=1` to turn that off.
 
 ## Requirements
@@ -530,8 +533,9 @@ python tests/live_stress.py 20              # against your real open files: 20 a
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md). Releases are tagged; after upgrading, re-run the
-plugin in Figma so it picks up the new `plugin/code.js`.
+See [CHANGELOG.md](CHANGELOG.md) and the [releases](https://github.com/denysosadchyi/figmosha2/releases).
+Every update ships as a `vX.Y.Z` release. To upgrade: `git pull`, restart the
+bridge, and re-run the plugin in Figma so it picks up the new `plugin/code.js`.
 
 ## License
 
