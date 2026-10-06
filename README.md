@@ -484,7 +484,8 @@ No Figma needed — a fake plugin drives the bridge over a real WebSocket:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q            # bridge: guard, exec round trip, timeouts, slot handover
+pytest -q                    # bridge, queue, stress & chaos (lost updates, leaked locks, junk input)
+python tests/live_stress.py  # against your real open files: N agents per file, counter must match            # bridge: guard, exec round trip, timeouts, slot handover
 node tests/helpers.test.js   # pure helpers: hex maths, auto-layout ordering
 ```
 

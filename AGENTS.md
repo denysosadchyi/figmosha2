@@ -84,6 +84,9 @@ python figmosha.py exec --file build.js -T "Component Library" --queue-timeout 3
   reply is **503 `file busy`** naming who holds the file, and **nothing was run** — retrying is safe,
   unlike after a 504.
 - A caller that hangs up while queued is dropped from the queue; its script never runs.
+- **Don't pause with `setTimeout` in scripts.** Figma throttles timers in background tabs:
+  `setTimeout(30)` takes ~30ms in the visible tab and up to ~1s in a background one, and every
+  agent queued behind you pays for it. Figma API calls stay fast in the background.
 
 Why the lock is needed: each file's plugin sandbox is a single-threaded async message handler over one
 shared document and one shared undo stack. Without it, two scripts yield to each other at **every

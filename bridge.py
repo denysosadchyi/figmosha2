@@ -553,30 +553,45 @@ async def exec_handler(request: web.Request) -> web.Response:
     if blocked is not None:
         return blocked
 
+    def bad(msg):
+        return web.json_response({"ok": False, "error": msg}, status=400)
+
     try:
         body = await request.json()
-    except json.JSONDecodeError:
-        return web.json_response({"ok": False, "error": "invalid JSON body"}, status=400)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return bad("invalid JSON body")
+    # Agents send all sorts of things; anything malformed is a 400 that says
+    # what is wrong, never a 500 from inside the bridge.
+    if not isinstance(body, dict):
+        return bad("body must be a JSON object: {\"code\": \"...\"}")
 
     code = body.get("code")
     if not isinstance(code, str) or not code.strip():
-        return web.json_response({"ok": False, "error": "missing or empty 'code'"}, status=400)
+        return bad("missing or empty 'code'")
 
-    conn_id, info = resolve_target(body.get("target"))
+    target = body.get("target")
+    if target is not None and not isinstance(target, str):
+        return bad("'target' must be a string: a file name or doc id")
+
+    try:
+        timeout = _seconds(body.get("timeout", 60), "timeout")
+        # How long this caller is willing to wait in the file's queue before
+        # giving up. Defaults to its own timeout, so the total stays bounded.
+        queue_timeout = _seconds(body.get("queue_timeout", timeout), "queue_timeout")
+    except ValueError as e:
+        return bad(str(e))
+    parallel = body.get("parallel", False) is True
+    force = body.get("force", False) is True
+    agent = body.get("agent")
+    agent = agent.strip()[:40] or None if isinstance(agent, str) else None
+
+    conn_id, info = resolve_target(target)
     if conn_id is None:
         # info holds the human-readable reason. 503 if nothing connected at all.
         no_plugins = not _live_plugins()
         return web.json_response({"ok": False, "error": info},
                                  status=503 if no_plugins else 409)
     target_ws = info["ws"]
-
-    timeout = float(body.get("timeout", 60))
-    parallel = bool(body.get("parallel", False))
-    force = bool(body.get("force", False))
-    agent = str(body.get("agent") or "").strip()[:40] or None
-    # How long this caller is willing to wait in the file's queue before giving
-    # up. Defaults to its own timeout, so the total stays bounded at ~2x.
-    queue_timeout = float(body.get("queue_timeout", timeout))
 
     # Reads are safe to fan out; anything that mutates must take the file's lock.
     if parallel:
@@ -627,6 +642,18 @@ async def exec_handler(request: web.Request) -> web.Response:
         lock.release()
 
 
+MAX_SECONDS = 3600  # one hour; a longer exec is a bug, not a plan
+
+
+def _seconds(value, name) -> float:
+    """A timeout from the request body: a number in (0, MAX_SECONDS]."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"'{name}' must be a number of seconds")
+    if not 0 < value <= MAX_SECONDS:
+        raise ValueError(f"'{name}' must be between 0 and {MAX_SECONDS} seconds")
+    return float(value)
+
+
 async def _acquire(lock, timeout) -> bool:
     """lock.acquire() with a deadline, without ever leaking the lock.
 
@@ -634,7 +661,20 @@ async def _acquire(lock, timeout) -> bool:
     granted and leave it held forever on older Pythons; this cannot.
     """
     task = asyncio.ensure_future(lock.acquire())
-    done, _ = await asyncio.wait({task}, timeout=max(timeout, 0))
+    try:
+        done, _ = await asyncio.wait({task}, timeout=max(timeout, 0))
+    except asyncio.CancelledError:
+        # The caller's handler was cancelled (it hung up) while queued. The inner
+        # acquire would otherwise live on, take the lock later and never give it
+        # back — the file would stay locked until the bridge restarts.
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        else:
+            lock.release()
+        raise
     if done:
         return True
     task.cancel()
@@ -821,10 +861,14 @@ async def clear_handler(request: web.Request) -> web.Response:
 
     try:
         body = await request.json()
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         body = {}
+    target = body.get("target") if isinstance(body, dict) else None
+    if target is not None and not isinstance(target, str):
+        return web.json_response(
+            {"ok": False, "error": "'target' must be a string: a file name or doc id"}, status=400)
 
-    conn_id, info = resolve_target(body.get("target"))
+    conn_id, info = resolve_target(target)
     if conn_id is None:
         no_plugins = not _live_plugins()
         return web.json_response({"ok": False, "error": info},

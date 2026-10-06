@@ -34,6 +34,14 @@ code it started with, so new helpers won't exist until you do. If
 - **One file open in two tabs had two locks**, one per connection, so two
   writers could get into the same document at once. The lock is now per
   document.
+- **A file could stay locked until the bridge restarted.** When a caller hung
+  up while waiting in the queue, the bridge stopped waiting for the lock, but
+  the lock request itself lived on, was granted later and never released —
+  found by the new chaos test.
+- **Malformed `/exec` and `/clear` bodies crashed the handler with a 500**: a
+  JSON array instead of an object, a non-string `target`, a timeout that isn't
+  a number. They are now a `400` naming the field; timeouts must be in
+  (0, 3600] seconds.
 - **A caller that gave up while queued still ran later.** The CLI's socket
   timeout ignored time spent waiting for a busy file; when it hung up, the
   bridge still ran the script once the file was free — a write nobody was
@@ -84,6 +92,11 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Added
 
+- **Stress and chaos tests.** `tests/test_stress.py` runs 50 concurrent
+  writers through a read-modify-write race (no lost update allowed), 4 files x
+  15 agents, a chaos mix of impatient, failing and hung-up callers, a plugin
+  dying mid-queue, a reconnect storm over one document, junk input and 5 MB
+  payloads. `tests/live_stress.py` runs the same race against your real files.
 - **A queue per file for several agents.** `/exec` waits its turn on the
   document's lock, and now says so: `targets` / `/status` show who is running on
   each file and who is waiting, callers name themselves with `--agent` /
