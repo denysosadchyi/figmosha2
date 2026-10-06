@@ -29,6 +29,8 @@ else
 fi
 
 up() { curl -sf "http://127.0.0.1:$PORT/status" >/dev/null 2>&1; }
+# Anything at all listening on the port — a bridge, or some other program.
+taken() { (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; }
 
 stop() {
     local was=1
@@ -40,10 +42,15 @@ stop() {
         rm -f "$PIDFILE"
     fi
     # Wait for the port to free up, so a restart doesn't race the old process.
-    for _ in $(seq 1 30); do up || break; sleep 0.1; done
-    if up; then
-        echo "[start-bridge] something else is serving port $PORT (not started by this script)."
-        echo "[start-bridge] stop it yourself, e.g.: lsof -ti tcp:$PORT | xargs kill"
+    for _ in $(seq 1 30); do taken || break; sleep 0.1; done
+    if taken; then
+        if up; then
+            echo "[start-bridge] a bridge not started by this script is serving port $PORT."
+        else
+            echo "[start-bridge] port $PORT is taken by another program."
+        fi
+        echo "[start-bridge] see what it is:  lsof -i tcp:$PORT     stop it:  lsof -ti tcp:$PORT | xargs kill"
+        echo "[start-bridge] or use another port:  FIGMOSHA_PORT=8788 bash start-bridge.sh"
         exit 1
     fi
     return $was
@@ -54,7 +61,7 @@ if [ "${1:-}" = "--stop" ]; then
     exit 0
 fi
 
-stop >/dev/null || true
+stop || true   # silent, unless the port is held by something else (then it exits)
 
 if ! "$PY" -c "import aiohttp" 2>/dev/null; then
     echo "[start-bridge] $PY cannot import aiohttp. Set up the venv first:"
