@@ -37,6 +37,7 @@ PLUGINS: dict = {}        # conn_id -> {"ws", "fileKey", "name", "docSig"}
 SLOT_PROBE_TIMEOUT = 1.0  # how long an incumbent connection has to answer a ping
 LOCKS: dict = {}          # conn_id -> asyncio.Lock — one exec at a time per file
 ABANDONED: dict = {}      # rid -> {"conn", "t0", "timeout"} — timed out, may still be running
+QUEUE: dict = {}          # conn_id -> {"waiting": [{agent, since}], "running": {agent, since} | None}
 
 # Host: values accepted in the Host header. Populated in main() from the bind
 # address. Empty set means "don't check" — chosen when the user binds a
@@ -181,17 +182,30 @@ async def _stop_update_checks(app):
         task.cancel()
 
 
-def _lock_for(conn_id):
-    """One lock per connected file.
+def _doc_key(conn_id):
+    """What the queue is keyed by: the document, not the connection.
+
+    One file open in two tabs is two connections over ONE document, so a lock per
+    connection would let two writers into the same file at once. The plugin's
+    document id (docSig) names the document; a plugin too old to send one falls
+    back to its connection.
+    """
+    info = PLUGINS.get(conn_id) or {}
+    sig = info.get("docSig")
+    return f"doc:{sig}" if sig else conn_id
+
+
+def _lock_for(key):
+    """One lock per document (see _doc_key).
 
     The Figma plugin sandbox runs a single-threaded async message handler, so two
     concurrent execs interleave at every `await` inside them — over one shared
-    document and one shared undo stack. Serializing per connection is what makes
+    document and one shared undo stack. Serializing per document is what makes
     concurrent callers (orchestrator + agents) safe on the same file.
     """
-    lock = LOCKS.get(conn_id)
+    lock = LOCKS.get(key)
     if lock is None:
-        lock = LOCKS[conn_id] = asyncio.Lock()
+        lock = LOCKS[key] = asyncio.Lock()
     return lock
 
 
@@ -437,8 +451,16 @@ async def plugin_ws_handler(request: web.Request):
                 if not entry["future"].done():
                     entry["future"].set_result(m)
     finally:
+        key = _doc_key(conn_id)
         PLUGINS.pop(conn_id, None)
-        LOCKS.pop(conn_id, None)
+        # The lock belongs to the document: keep it while another tab on the same
+        # document is still connected or someone is holding / waiting for it.
+        if not any(_doc_key(c) == key for c in PLUGINS):
+            q = QUEUE.get(key)
+            lock = LOCKS.get(key)
+            if not (q and (q["waiting"] or q["running"])) and not (lock and lock.locked()):
+                LOCKS.pop(key, None)
+                QUEUE.pop(key, None)
         print(f"[plugin] disconnected {conn_id[:8]}")
         # Fail in-flight requests routed to THIS connection so clients don't hang.
         for rid, entry in list(PENDING.items()):
@@ -461,7 +483,7 @@ def _live_plugins():
 
 
 def resolve_target(target):
-    """Map a target string (file name, fileKey, or substring) to a connection.
+    """Map a target string (connection id, file name, fileKey, or substring) to a connection.
 
     Returns (conn_id, info) on success, or (None, reason) where reason is a
     human-readable string explaining the miss for the error response.
@@ -473,11 +495,20 @@ def resolve_target(target):
     if target is None or target == "":
         if len(live) == 1:
             return live[0]
+        # Several tabs on ONE document are still one file — no target needed.
+        if len({_doc_key(c) for c, _ in live}) == 1 and live[0][1].get("docSig"):
+            return live[-1]
         names = ", ".join(repr(i.get("name") or f"({c[:8]})") for c, i in live)
         return None, (f"{len(live)} files connected — specify a target. "
                       f"Connected: {names}")
 
     t = target.lower()
+    # 0. a connection id (or its first 6+ characters, as `targets` prints 8) —
+    #    the way to pick one of two different files that share a name.
+    if len(t) >= 6:
+        by_conn = [(cid, i) for cid, i in live if cid.startswith(t)]
+        if len(by_conn) == 1:
+            return by_conn[0]
     # 1. exact name (case-insensitive) — must be unique, or the caller cannot know
     #    which of two same-named windows it just wrote to.
     exact = [(cid, i) for cid, i in live if i.get("name") and i["name"].lower() == t]
@@ -495,8 +526,9 @@ def resolve_target(target):
         # caller did not choose.
         conns = ", ".join(c[:8] for c, _ in exact)
         return None, (f"{len(exact)} connected files are named {target!r} "
-                      f"(conns: {conns}) — different documents sharing a name; "
-                      f"close one, target cannot be resolved safely")
+                      f"(conns: {conns}) — different documents sharing a name. "
+                      f"Pick one by its conn id, e.g. -T {exact[0][0][:8]}, or rename one "
+                      f"of the files")
     # 2. exact fileKey
     for cid, i in live:
         if i.get("fileKey") == target:
@@ -537,12 +569,77 @@ async def exec_handler(request: web.Request) -> web.Response:
     timeout = float(body.get("timeout", 60))
     parallel = bool(body.get("parallel", False))
     force = bool(body.get("force", False))
+    agent = str(body.get("agent") or "").strip()[:40] or None
+    # How long this caller is willing to wait in the file's queue before giving
+    # up. Defaults to its own timeout, so the total stays bounded at ~2x.
+    queue_timeout = float(body.get("queue_timeout", timeout))
 
     # Reads are safe to fan out; anything that mutates must take the file's lock.
     if parallel:
         return await _dispatch(target_ws, conn_id, code, timeout, force)
-    async with _lock_for(conn_id):
-        return await _dispatch(target_ws, conn_id, code, timeout, force)
+
+    key = _doc_key(conn_id)
+    lock = _lock_for(key)
+    q = QUEUE.setdefault(key, {"waiting": [], "running": None})
+    me = {"agent": agent, "since": time.time()}
+    q["waiting"].append(me)
+    try:
+        got = await _acquire(lock, queue_timeout)
+    finally:
+        q["waiting"].remove(me)
+    queued_ms = int((time.time() - me["since"]) * 1000)
+
+    if not got:
+        # Busy for longer than the caller agreed to wait. Nothing was sent to
+        # the plugin, so retrying later is safe — unlike after a 504.
+        holder = q["running"] or {}
+        who = holder.get("agent") or "another caller"
+        held = int(time.time() - holder["since"]) if holder else 0
+        return web.json_response({
+            "ok": False,
+            "error": (f"file busy: {who} has been running for {held}s and "
+                      f"{len(q['waiting'])} more are waiting — gave up after "
+                      f"{queue_timeout:g}s in the queue. Nothing was run; retry later "
+                      f"or raise queue_timeout."),
+            "busy": {"running": holder.get("agent"), "running_s": held,
+                     "waiting": len(q["waiting"])},
+            "queued_ms": queued_ms,
+        }, status=503)
+
+    try:
+        transport = request.transport
+        if transport is None or transport.is_closing():
+            # The caller hung up while it waited (its own socket timeout). Running
+            # the script now would apply a change nobody is waiting for — and the
+            # caller, seeing a failure, may well retry it. Skip it.
+            print(f"[queue] caller left after {queued_ms}ms in the queue — not running")
+            return web.json_response({"ok": False, "error": "caller disconnected"},
+                                     status=499)
+        q["running"] = {"agent": agent, "since": time.time()}
+        return await _dispatch(target_ws, conn_id, code, timeout, force,
+                               meta={"queued_ms": queued_ms})
+    finally:
+        q["running"] = None
+        lock.release()
+
+
+async def _acquire(lock, timeout) -> bool:
+    """lock.acquire() with a deadline, without ever leaking the lock.
+
+    asyncio.wait_for(lock.acquire()) can time out in the same tick the lock is
+    granted and leave it held forever on older Pythons; this cannot.
+    """
+    task = asyncio.ensure_future(lock.acquire())
+    done, _ = await asyncio.wait({task}, timeout=max(timeout, 0))
+    if done:
+        return True
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        return False
+    lock.release()  # granted while we were cancelling — hand it back
+    return False
 
 
 async def _send_abort(target_ws, rid):
@@ -566,7 +663,7 @@ def _abandon(rid, conn_id, timeout, target_ws):
     asyncio.get_running_loop().create_task(_send_abort(target_ws, rid))
 
 
-async def _dispatch(target_ws, conn_id, code, timeout, force) -> web.Response:
+async def _dispatch(target_ws, conn_id, code, timeout, force, meta=None) -> web.Response:
     """Send one exec to a plugin and await its reply. Caller holds the lock."""
     stale = [r for r, o in ABANDONED.items() if o.get("conn") == conn_id]
     if stale and not force:
@@ -610,14 +707,14 @@ async def _dispatch(target_ws, conn_id, code, timeout, force) -> web.Response:
                 "logs": list(entry.get("logs", [])),
             }, status=504)
 
-        return _reply(PENDING[rid], result)
+        return _reply(PENDING[rid], result, meta)
     finally:
         # Always reap, including on client disconnect / task cancellation —
         # otherwise /status `pending` inflates permanently.
         PENDING.pop(rid, None)
 
 
-def _reply(entry, result) -> web.Response:
+def _reply(entry, result, meta=None) -> web.Response:
     elapsed_ms = int((time.time() - entry["t0"]) * 1000)
 
     if result.get("type") == "error":
@@ -645,6 +742,7 @@ def _reply(entry, result) -> web.Response:
     notice = _version_notice(PLUGINS.get(entry.get("conn")) or {})
     if notice:
         body["notice"] = notice
+    body.update(meta or {})
     return web.json_response(body, status=status)
 
 
@@ -673,6 +771,13 @@ def _files_payload():
         key = (i.get("name"), i.get("docSig"))
         entry = {"name": i.get("name"), "fileKey": i.get("fileKey"), "conn": cid[:8],
                  "plugin": i.get("pluginVersion"), "outdated": plugin_outdated(i)}
+        q = QUEUE.get(_doc_key(cid)) or {}
+        running = q.get("running")
+        entry["queue"] = {
+            "running": ({"agent": running["agent"],
+                         "for_s": int(time.time() - running["since"])} if running else None),
+            "waiting": [w["agent"] or "?" for w in q.get("waiting", [])],
+        }
         if i.get("docSig") is not None and key in seen:
             # Another tab/window on the same document. Harmless — flagged so the
             # count in `files` is not read as "two different files".

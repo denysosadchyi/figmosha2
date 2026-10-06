@@ -4,7 +4,7 @@ figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
 // disk and asks for a re-Run when they differ, because a running plugin keeps
 // the code it started with. Bump it on every change to plugin/ —
 // tests/test_plugin_version.py fails until you do.
-const PLUGIN_VERSION = "2026-10-02.3";
+const PLUGIN_VERSION = "2026-10-06.1";
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
@@ -21,11 +21,29 @@ function postIdentity() {
 }
 
 // `figma.fileKey` is null for a local dev plugin and `figma.root.id` is "0:0" in
-// every file, so neither identifies the document. Page node ids are file-scoped
-// and stable, so their list distinguishes "the same file open in two windows"
-// (identical signature) from "two different files that happen to share a name"
-// (different signature). The bridge needs that to route a target safely.
+// every file, so neither identifies the document. The bridge needs an id that is
+// the same for one file open in two windows and different for two files that
+// share a name, to route a target safely.
+//
+// Page ids are not enough: every new file starts with a single page "0:1", so two
+// fresh "Untitled" files looked like one document and both got the writes meant
+// for one of them. So the plugin stores a random id in the document itself, once,
+// and reads it back on every run. (A duplicated file copies it; rename one.)
 function docSignature() {
+  try {
+    let id = figma.root.getPluginData("figmosha-doc");
+    if (!id) {
+      id = "d" + Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+      figma.root.setPluginData("figmosha-doc", id);
+    }
+    return id;
+  } catch (e) {
+    return pageSignature();
+  }
+}
+
+// Fallback when plugin data can't be read or written: hash of the page ids.
+function pageSignature() {
   try {
     const ids = figma.root.children.map((p) => p.id).join(",");
     let hash = 5381;

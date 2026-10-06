@@ -30,7 +30,8 @@ def run(coro):
 def clean_state():
     """The module keeps its state in globals; give every test a fresh one."""
     def reset():
-        for registry in (bridge.PENDING, bridge.PLUGINS, bridge.LOCKS, bridge.ABANDONED):
+        for registry in (bridge.PENDING, bridge.PLUGINS, bridge.LOCKS, bridge.ABANDONED,
+                         bridge.QUEUE):
             registry.clear()
         bridge.ALLOWED_HOSTS = set()
         bridge.UPDATE = None

@@ -49,6 +49,8 @@ HOST = DEFAULT_HOST
 PORT = DEFAULT_PORT
 TARGET = None  # which connected Figma file to route to (file name / fileKey / substring)
 PARALLEL = False  # skip the bridge's per-file lock — READ-ONLY scripts only
+AGENT = os.environ.get("FIGMOSHA_AGENT") or None  # who is calling, shown in the file's queue
+QUEUE_TIMEOUT = None  # max seconds to wait for a busy file; bridge default = --timeout
 
 KNOWN_CMDS = {
     "exec", "status", "targets", "clear", "doctor", "sel", "tree", "find", "text", "variant",
@@ -100,10 +102,17 @@ def _exec(code, timeout=60):
         payload["target"] = TARGET
     if PARALLEL:
         payload["parallel"] = True
-    # The socket deadline has to outlast the server-side one, otherwise a long
-    # --timeout dies here at the default 65s while the bridge is still waiting,
-    # and we lose the bridge's own error payload (including any hint).
-    return _request("POST", "/exec", payload, timeout=timeout + 5)
+    if AGENT:
+        payload["agent"] = AGENT
+    queue = timeout if QUEUE_TIMEOUT is None else QUEUE_TIMEOUT
+    payload["queue_timeout"] = queue
+    # The socket deadline has to outlast the bridge's own: time in the file's
+    # queue plus the run itself. Hanging up earlier loses the bridge's error
+    # payload, and used to leave a queued script to run with nobody waiting.
+    status, resp = _request("POST", "/exec", payload, timeout=queue + timeout + 5)
+    if resp.get("queued_ms", 0) >= 1000:
+        print(f"  (waited {resp['queued_ms'] / 1000:.1f}s in the file's queue)", file=sys.stderr)
+    return status, resp
 
 
 def _emit(resp, raw=False):
@@ -150,7 +159,13 @@ def cmd_targets(args):
     for f in files:
         name = f.get("name") or "(unidentified)"
         key = f.get("fileKey") or "-"
-        print(f"{name}\t{key}\t{f.get('conn')}")
+        q = f.get("queue") or {}
+        run = q.get("running")
+        busy = f"busy: {run.get('agent') or '?'} {run.get('for_s')}s" if run else "idle"
+        if q.get("waiting"):
+            busy += f", waiting: {', '.join(q['waiting'])}"
+        same = f"\tsame document as {f['sameDocAs']}" if f.get("sameDocAs") else ""
+        print(f"{name}\t{key}\t{f.get('conn')}\t{busy}{same}")
     return 0
 
 
@@ -412,6 +427,12 @@ def _add_common_flags(p):
     p.add_argument("--parallel", action="store_true",
                    help="bypass the per-file lock so reads can fan out. "
                         "READ-ONLY scripts only — a parallel writer interleaves.")
+    p.add_argument("--agent", "-A", default=None,
+                   help="name shown in the file's queue (env FIGMOSHA_AGENT)")
+    p.add_argument("--queue-timeout", type=float, default=None,
+                   help="seconds to wait while another caller holds the file "
+                        "(default: same as --timeout); gives up with 'file busy' "
+                        "without running anything")
 
 
 def build_parser():
@@ -508,11 +529,13 @@ def main():
         ap.print_help()
         sys.exit(2)
 
-    global HOST, PORT, TARGET, PARALLEL
+    global HOST, PORT, TARGET, PARALLEL, AGENT, QUEUE_TIMEOUT
     HOST = args.host
     PORT = args.port
     TARGET = getattr(args, "target", None)
     PARALLEL = getattr(args, "parallel", False)
+    AGENT = getattr(args, "agent", None) or AGENT
+    QUEUE_TIMEOUT = getattr(args, "queue_timeout", None)
 
     dispatch = {
         "status": cmd_status,

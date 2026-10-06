@@ -34,7 +34,7 @@ curl -s http://localhost:8787/status   # {"plugin_connected": ..., "files": [...
 The bridge holds **one connection per open Figma file** that is running the plugin, not one globally.
 
 ```bash
-python figmosha.py targets                      # list connected files: name / fileKey / conn
+python figmosha.py targets                      # name / fileKey / conn / queue (busy: who, waiting: who)
 curl -s http://localhost:8787/targets
 
 # -T is a per-subcommand flag — it goes AFTER the subcommand, never before it
@@ -43,8 +43,12 @@ python figmosha.py tree 123:456 -T "Component Library"
 curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Icons"}'
 ```
 
-`target` matching (`resolve_target` in `bridge.py`): exact file name (case-insensitive) → exact
-`fileKey` → unambiguous substring of the name.
+`target` matching (`resolve_target` in `bridge.py`): connection id (the `conn` column, 6+ chars) →
+exact file name (case-insensitive) → exact `fileKey` → unambiguous substring of the name.
+
+- **Two different files with the same name** (two fresh "Untitled" files, say) → the name is a 409;
+  target each by its `conn` id: `-T 3a2a5647`. Each file carries its own id (plugin data
+  `figmosha-doc` on the document root, written once on first run), so the bridge never mixes them up.
 
 - The name is `figma.root.name` as the plugin reports it, which is often not the name you remember —
   a trailing plural, a rename that never propagated. **Verify with `targets`, don't assume.**
@@ -57,12 +61,27 @@ curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Icons"}'
   This is the #1 wasted call. **Always pass `-T`** with the file name from the project profile.
 - Ambiguous substring → 409 listing the candidates. Nothing connected → 503.
 
-### Concurrency
+### Concurrency: the per-file queue
 
-**The bridge serializes execs per file** (added 2026-08-10). Requests are multiplexed by request id,
-and `/exec` takes a per-connection `asyncio.Lock` before sending — so two callers on the same file
-(orchestrator + agent, or two agents) run **one after another, never interleaved**. Concurrent callers
-on *different* files are unaffected.
+**The bridge queues execs per document.** Requests are multiplexed by request id, and `/exec` waits for
+the document's lock before sending — so two callers on the same file (orchestrator + agent, or two
+agents) run **one after another, never interleaved**, and callers on *different* files never wait for
+each other. The lock belongs to the document, not the connection: one file open in two tabs is one
+queue.
+
+**Several agents at once — name yourself and bound your wait:**
+
+```bash
+export FIGMOSHA_AGENT=designer            # or --agent designer / -A designer, or "agent" in the JSON
+python figmosha.py exec --file build.js -T "Component Library" --queue-timeout 30
+```
+
+- `targets` / `/status` show each file's queue: who is running and for how long, who is waiting.
+- A reply that waited carries `queued_ms`; the CLI prints `(waited 2.1s in the file's queue)`.
+- `--queue-timeout` (JSON `queue_timeout`, default = `--timeout`) caps the wait. When it runs out the
+  reply is **503 `file busy`** naming who holds the file, and **nothing was run** — retrying is safe,
+  unlike after a 504.
+- A caller that hangs up while queued is dropped from the queue; its script never runs.
 
 Why the lock is needed: each file's plugin sandbox is a single-threaded async message handler over one
 shared document and one shared undo stack. Without it, two scripts yield to each other at **every

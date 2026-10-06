@@ -129,7 +129,7 @@ authentication beyond being on the machine.
 
 | Endpoint | Body | Returns |
 |---|---|---|
-| `POST /exec` | `{code, timeout?, target?, parallel?}` | `{ok, result, value, logs, elapsed_ms, notice?}` — `notice` when the plugin or bridge runs stale code |
+| `POST /exec` | `{code, timeout?, target?, parallel?, agent?, queue_timeout?}` | `{ok, result, value, logs, elapsed_ms, notice?}` — `notice` when the plugin or bridge runs stale code |
 | `GET /status` | — | `{plugin_connected, plugin_version, bridge_outdated, update, files, pending, abandoned}` — each file has `plugin` and `outdated`; `update` is `{behind, url}` when GitHub has newer commits |
 | `GET /targets` | — | `{files: [{name, fileKey, conn}]}` — connected Figma files |
 | `POST /clear` | `{target?, force?}` | drops a file's abandoned-script interlock |
@@ -160,13 +160,13 @@ and with two or more files connected a `1/2 ✓` pill says which window this is
 and how many are open.
 
 ```bash
-python figmosha.py targets                          # name / fileKey / conn per file
+python figmosha.py targets                          # name / fileKey / conn / queue per file
 python figmosha.py exec "return figma.root.name" -T "Component Library"
 curl -s -X POST http://localhost:8787/exec -d '{"code":"...","target":"Component Library"}'
 ```
 
-Target resolution: exact file name (case-insensitive) → exact `fileKey` →
-unambiguous substring of the name.
+Target resolution: connection id (`conn` in `targets`) → exact file name
+(case-insensitive) → exact `fileKey` → unambiguous substring of the name.
 
 - No target with exactly one file connected routes there — the old behavior.
 - No target with two or more connected is `409` ("N files connected — specify a
@@ -175,24 +175,40 @@ unambiguous substring of the name.
   its own connection, and `-T` routes to the newest live one. They edit the same
   document, so the caller cannot end up in "the other copy"; `/status` flags the
   extra views with `sameDocAs`.
-- **Two different files that happen to share a name are still refused**, not
-  guessed — the `409` lists both connections so you can close one. The bridge
-  tells the two cases apart with a `docSig`: `figma.fileKey` is null for a local
-  dev plugin and `figma.root.id` is `"0:0"` in every file, so the plugin hashes
-  its page node ids, which are file-scoped and stable.
+- **Two different files that happen to share a name** (two fresh "Untitled"
+  files) are never guessed: the name is a `409` that lists both connections, and
+  `-T <conn>` picks one. The bridge tells them apart by a document id the plugin
+  stores in each file's plugin data the first time it runs there —
+  `figma.fileKey` is null for a local dev plugin, `figma.root.id` is `"0:0"`
+  everywhere, and page ids don't work either: every new file starts with page
+  `0:1`.
 - Re-running the plugin in a file replaces its previous connection at `hello`
   time **only if that connection is dead** — socket already closed, or no answer
   to a 1s liveness ping. A live one keeps its slot, so a re-Run never locks you
   out and two open views never evict each other.
 
-**Execs are serialized per file.** Each file's plugin sandbox is a
-single-threaded async message handler over one shared document and one shared
-undo stack — two concurrent scripts interleave at every `await`, invalidating
-each other's `findAll` snapshots mid-run. The bridge therefore takes a per-file
-lock around `/exec`, so concurrent callers on the same file run one after
-another, and callers on different files don't wait on each other. One exec is
-one transaction: a read-modify-write split across two calls still lets another
-writer land in the gap.
+**Each file has a queue.** Each file's plugin sandbox is a single-threaded
+async message handler over one shared document and one shared undo stack — two
+concurrent scripts interleave at every `await`, invalidating each other's
+`findAll` snapshots mid-run. So `/exec` waits its turn on the document's lock:
+callers on the same file run one after another, callers on different files never
+wait for each other, and one file open in two tabs is still one queue. One exec
+is one transaction: a read-modify-write split across two calls still lets
+another writer land in the gap.
+
+```bash
+export FIGMOSHA_AGENT=designer                      # name shown in the queue (or --agent)
+python figmosha.py exec --file build.js -T Icons --queue-timeout 30
+python figmosha.py targets
+# Icons   -   3a2a5647   busy: designer 4s, waiting: copywriter, qa
+```
+
+- `--queue-timeout` (`queue_timeout`, default = the exec's `timeout`) caps the
+  wait. When it runs out the reply is `503 file busy`, naming who holds the file,
+  and **nothing was run** — so retrying is safe.
+- Replies that waited carry `queued_ms`. A caller that hangs up while queued is
+  dropped; its script never runs, so a client-side timeout can't turn into a
+  surprise write later.
 
 - Read-only scripts can pass `--parallel` (`{"parallel": true}`) to bypass the
   lock and fan out. Reads only — a parallel writer interleaves exactly as before.

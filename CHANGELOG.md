@@ -27,6 +27,18 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Fixed
 
+- **Two new "Untitled" files were treated as one document**, so every write
+  went to the newest and the other file was unreachable. The plugin identified a
+  document by its page ids, and every new file starts with page `0:1`. It now
+  stores a random id in the file's plugin data once and reports that.
+- **One file open in two tabs had two locks**, one per connection, so two
+  writers could get into the same document at once. The lock is now per
+  document.
+- **A caller that gave up while queued still ran later.** The CLI's socket
+  timeout ignored time spent waiting for a busy file; when it hung up, the
+  bridge still ran the script once the file was free — a write nobody was
+  waiting for, likely retried by the caller. The CLI now allows for the queue,
+  and the bridge drops callers that left.
 - Descenders in the plugin bar's text were clipped at the bottom.
 - **`start-bridge.ps1` did not run in Windows PowerShell 5.1**, the one Windows
   ships with. The file had em dashes and arrows but no BOM, so 5.1 read it as
@@ -72,6 +84,14 @@ code it started with, so new helpers won't exist until you do. If
 
 ### Added
 
+- **A queue per file for several agents.** `/exec` waits its turn on the
+  document's lock, and now says so: `targets` / `/status` show who is running on
+  each file and who is waiting, callers name themselves with `--agent` /
+  `FIGMOSHA_AGENT` / `"agent"`, replies carry `queued_ms`, and
+  `--queue-timeout` / `"queue_timeout"` caps the wait with a `503 file busy`
+  that guarantees nothing ran.
+- **`-T` takes a connection id**, so two different files with the same name
+  (two fresh "Untitled" files) can each be targeted.
 - **"New version" with an Update button.** The bridge asks GitHub every 6
   hours how many commits this checkout is behind `master`. When there are new
   ones, the plugin bar turns blue with "New version" and a white **Update**
