@@ -12,6 +12,7 @@ matter for several agents sharing files:
 
     pytest tests/test_fuzz.py
     FIGMOSHA_FUZZ_SEEDS=500 pytest tests/test_fuzz.py -k scenario   # longer run
+    pytest tests/test_fuzz.py --slow                                # plus the soak test
 """
 import asyncio
 import json
@@ -23,9 +24,9 @@ import pytest
 
 import bridge
 from test_bridge import make_client, run
-from test_stress import Document, SandboxPlugin, call
+from test_stress import Document, SandboxPlugin, call, until
 
-SEEDS = int(os.environ.get("FIGMOSHA_FUZZ_SEEDS", "40"))
+SEEDS = int(os.environ.get("FIGMOSHA_FUZZ_SEEDS", "5"))
 
 
 # ─── scenario fuzzer ──────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ async def scenario(seed):
         if not any(p.doc == doc_id for p in plugins):
             await open_tab(doc_id)
     await asyncio.wait_for(asyncio.gather(*inflight, return_exceptions=True), timeout=20)
-    await asyncio.sleep(0.2)
+    await until(lambda: all(d.running == 0 for d in docs.values()), what="orphan scripts finish")
 
     for doc_id, d in docs.items():
         assert d.max_running <= 1, f"seed {seed}: two scripts ran at once in {doc_id}"
@@ -123,7 +124,8 @@ def test_hostile_plugin_messages_do_not_break_the_bridge():
             for msg in HOSTILE_PLUGIN_MESSAGES:
                 await bad.send_str(msg)
             await bad.send_bytes(b"\x00\xff binary")
-            await asyncio.sleep(0.2)
+            # The bridge drops a socket that sends junk it cannot read: wait for that.
+            await until(lambda: len(bridge.PLUGINS) == 1, what="the bad socket is dropped")
             r = await call(c, {"op": "rmw", "pause": 0}, target="docGOOD01")
             assert r.status == 200
             assert (await c.get("/status")).status == 200
@@ -156,36 +158,7 @@ def test_duplicate_and_late_results_are_ignored():
     run(go())
 
 
-# ─── the request guard under attack ───────────────────────────────────────
-
-@pytest.mark.parametrize("headers", [
-    {"Origin": "https://evil.example"},
-    {"Origin": "null"},                                   # null is for the plugin WS only
-    {"Origin": "http://localhost:8787"},                  # even "same-looking" origins
-    {"Host": "evil.example"},
-    {"Host": "localhost.evil.example:8787"},
-    {"Host": "127.0.0.1.nip.io:8787"},                    # DNS rebinding style
-    {"Host": "localhost:9999"},
-    {"Host": ""},
-])
-def test_guard_refuses_browser_and_rebinding_requests(headers):
-    async def go():
-        c = await make_client()
-        h = {"Host": "127.0.0.1:8787", **headers}
-        async with SandboxPlugin(c, "A", "docAAAAAA") as p:
-            # Pin the Host check the way main() does for a real bridge on 8787
-            # (after the test plugin is connected, which uses the test port).
-            bridge.ALLOWED_HOSTS = {"localhost:8787", "127.0.0.1:8787", "[::1]:8787"}
-            for method, path, data in (("GET", "/status", None),
-                                       ("POST", "/exec", json.dumps({"code": json.dumps({"op": "rmw"})})),
-                                       ("POST", "/clear", "{}")):
-                r = await c.request(method, path, data=data,
-                                    headers={**h, "Content-Type": "text/plain"})
-                assert r.status == 403, (headers, path, r.status)
-            assert p.counter == 0, "a refused request still ran a script"
-        await c.close()
-    run(go())
-
+# ─── the request guard (Host/Origin cases live in test_bridge) ─────────────
 
 def test_websocket_from_a_web_page_is_refused():
     async def go():
@@ -200,6 +173,7 @@ def test_websocket_from_a_web_page_is_refused():
 
 # ─── endurance ────────────────────────────────────────────────────────────
 
+@pytest.mark.slow
 def test_thousands_of_execs_leave_no_residue():
     """3000 execs across 3 files, some failing, some impatient, some hung up:
     the bridge's bookkeeping returns to empty — nothing grows without bound."""

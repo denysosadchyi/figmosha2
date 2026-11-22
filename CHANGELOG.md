@@ -10,6 +10,102 @@ code it started with, so new helpers won't exist until you do. If
 
 ## [Unreleased]
 
+## [2.4.0] — 2026-11-22
+
+### Added
+
+- **Chat with an agent inside the plugin.** The chat icon turns the thin bar
+  into a chat window. You talk to Claude Code or Codex there, and its scripts
+  go to the same Figma file. There is one session per Figma file for each
+  agent. The session is kept, so a restart goes on with the same conversation.
+- **Agent choice: Claude Code or Codex.** The bridge finds the agents that
+  are installed on its computer. It also finds Claude Code inside the Claude
+  desktop app on Windows. When both are found, the default is Claude Code.
+  When Figmosha was installed from Codex, the default is Codex.
+- Agent detection on macOS finds Homebrew, home npm folders and the Claude
+  desktop app copy. It works when the bridge starts with a short PATH.
+- **Model and effort choice.** The models and the efforts come from the
+  agent's own list. The default is Opus with medium effort. A change applies
+  from the next message, and the chat shows a note when the agent or the
+  model changes.
+- Each agent runs with bypass permissions and uses your own login. Codex runs
+  with bypass too, like Claude.
+- With Codex the slash popup offers only `/clear`. The texts in the plugin say
+  Codex when Codex is active.
+- `/model`, `/effort` and `/fast` are not sent to the agent. A note says to
+  pick the model and the effort in the settings.
+- **No agent card.** When no agent is found, a card shows in place of the
+  composer. It names both agents, gives one install command for each and has
+  a Check again button.
+- New bridge routes: `GET /chat/settings` and `POST /chat/settings` (agent,
+  model, effort) and `POST /chat/recheck` (look for the agents again). New
+  socket messages from the plugin: `chat-settings`, `chat-recheck` and
+  `chat-detect`. Every tab gets a `settings` event on a change. See
+  `docs/CHAT.md`.
+- Claude answers stream in live. A short line shows what Claude does right
+  now. The Stop button ends a turn.
+- Replies show bold text, code, headings and GFM tables.
+- You can add images (photos) to a message. You can quote an earlier
+  message in a reply.
+- Claude can offer action buttons (A, B, C, D) under a reply. One click sends
+  that choice.
+- Claude can ask questions in a reply. You answer each question in place.
+- A slash commands popup opens when you type `/`. `/clear` starts a fresh
+  session and keeps the history.
+- Claude Code errors show as one clear line, for example a used up limit or
+  a missing login.
+- **Settings page.** The settings icon next to the chat icon opens it.
+- Language: Українська (Ukrainian) or English. Claude answers in the language
+  you pick, and so do the chat notes and errors.
+- Theme: Like Figma, Light or Dark.
+- UI scale: 90, 100, 110 or 125 percent. The window resizes with it.
+- Agent, model and effort, see above.
+- The settings page is a plain list. Each setting is one row: the label on
+  the left, a dropdown on the right, and a divider line between rows. Every
+  setting is a dropdown.
+- **Welcome screen.** Each new Figma file shows a welcome screen the first
+  time the plugin opens there. It has the real chat composer. It does not
+  show the scale and theme line under the field.
+- **First launch onboarding.** Your very first run shows four steps: what
+  Figmosha does, language, theme and scale. Each choice applies at once.
+- **Window resize by edges and corners.** Drag any edge or corner of the chat
+  window. There are no grips or icons.
+- The chat window remembers its size and its position on screen.
+- **Update card in the chat.** In chat mode a new release shows a card at the
+  end of the chat. Оновити opens the release notes. Пропустити hides the card
+  for that version only. A stale plugin gets a re-run card instead.
+  `FIGMOSHA_FAKE_LATEST=9.9.9` fakes a release for a live test.
+
+### Changed
+
+- **Product name.** The product name is now just Figmosha, without the word
+  bridge: the plugin menu item, the window title, the hints and the docs.
+  Technical ids stay the same (the manifest id, the health `service`, logs).
+  If the menu still shows the old name, re-import `plugin/manifest.json`.
+- **Dark theme in Figma UI3 colors.** Dark mode now uses the same neutral
+  greys and blue as Figma UI3.
+- **Thin overlay scrollbar.** The chat, settings and welcome screen use a thin
+  scrollbar that takes no space. It shows on scroll or hover and fades out.
+- The plugin bar has no colored strip. Only the status icon shows the state.
+- Corner radii follow the 12px plugin window radius.
+- The service banner at `GET /` reports the real bridge version. Before, it
+  always said 2.0.
+
+### Fixed
+
+- A stale socket that closed late no longer breaks the new connection. Before,
+  its close could set the bar to reconnecting while the new socket was up.
+- An answer to a question is checked properly. A true or false value is no
+  longer taken as a message or question number.
+- A withdrawn release now clears the offer in open plugins (`update` with
+  `latest: null`). Before, the bar kept offering it until a reconnect.
+- The Update link check needs `figmosha2/`, so a look-alike repo such as
+  `figmosha2evil` is not opened.
+- After `/clear` the note names the agent that is active. Before, it always
+  said Claude, also with Codex.
+
+[2.4.0]: https://github.com/denysosadchyi/figmosha2/compare/v2.3.0...v2.4.0
+
 ## [2.3.0] — 2026-10-06
 
 ### Changed

@@ -155,7 +155,7 @@ def cmd_targets(args):
     status, resp = _request("GET", "/targets")
     files = resp.get("files") or []
     if not files:
-        print("no files connected — Run the Figmosha Bridge plugin in each Figma file",
+        print("no files connected — Run the Figmosha plugin in each Figma file",
               file=sys.stderr)
         return 1
     for f in files:
@@ -217,7 +217,7 @@ def cmd_doctor(args):
 
     if not resp.get("plugin_connected"):
         fail("plugin not connected",
-             "in Figma Desktop: Plugins → Development → Figmosha Bridge")
+             "in Figma Desktop: Plugins → Development → Figmosha")
         return 1
     ok("plugin connected")
 
@@ -227,7 +227,7 @@ def cmd_doctor(args):
             stale = True
             fail(f"«{f.get('name')}» runs an older plugin build "
                  f"({f.get('plugin') or 'unversioned'}, current {current})",
-                 "re-run it in that file: Plugins → Development → Figmosha Bridge")
+                 "re-run it in that file: Plugins → Development → Figmosha")
     if current and not stale:
         ok(f"plugin build {current} everywhere")
     update = resp.get("update")
@@ -536,7 +536,8 @@ def main():
     global HOST, PORT, TARGET, PARALLEL, AGENT, QUEUE_TIMEOUT
     HOST = args.host
     PORT = args.port
-    TARGET = getattr(args, "target", None)
+    # Inside a plugin chat session the bridge sets FIGMOSHA_TARGET to that file.
+    TARGET = getattr(args, "target", None) or os.environ.get("FIGMOSHA_TARGET") or None
     PARALLEL = getattr(args, "parallel", False)
     AGENT = getattr(args, "agent", None) or AGENT
     QUEUE_TIMEOUT = getattr(args, "queue_timeout", None)

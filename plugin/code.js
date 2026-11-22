@@ -1,10 +1,13 @@
-figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha Bridge" });
+// Hidden until the stored mode and settings (scale, theme) are read, so the
+// window does not flash at the wrong size or in the wrong theme.
+// themeColors: Figma puts figma-light / figma-dark on <html> for the System theme.
+figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha", themeColors: true, visible: false });
 
 // Build id of this plugin code. The bridge compares it with plugin/code.js on
 // disk and asks for a re-Run when they differ, because a running plugin keeps
 // the code it started with. Bump it on every change to plugin/ —
-// tests/test_plugin_version.py fails until you do.
-const PLUGIN_VERSION = "2026-10-06.7";
+// python3 tools/bump_plugin.py does it (or the tools/pre-commit hook).
+const PLUGIN_VERSION = "2026-11-22.6";
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
@@ -57,6 +60,221 @@ function pageSignature() {
   }
 }
 postIdentity();
+
+// Window mode: the thin bar or the chat, switched by the chat icon in the UI.
+// The choice is kept per user in clientStorage and restored on the next run.
+const UI_MODES = { bar: [220, 28], chat: [380, 560] };
+const UI_MODE_KEY = "figmosha-ui-mode";
+// Settings page: interface scale and theme. The window size follows the scale,
+// because the UI is zoomed as a whole and would be clipped otherwise.
+const SETTINGS_KEY = "figmosha-settings";
+const UI_SCALES = [0.9, 1, 1.1, 1.25];
+const UI_THEMES = ["system", "light", "dark"];
+// Interface and chat language. Settings stored before it existed have no lang: uk.
+const UI_LANGS = ["uk", "en"];
+const RERUN_HINT = {
+  uk: "Запусти Figmosha знову. Він візьме нову версію.",
+  en: "Run Figmosha again. It will load the new version.",
+};
+// Chat window size set by dragging its edges (base px at scale 1), kept per user.
+const CHAT_SIZE_KEY = "figmosha-chat-size";
+const CHAT_MIN = [320, 400], CHAT_MAX = [900, 1400];
+let chatSize = UI_MODES.chat.slice();
+let uiMode = "bar";
+let uiScale = 1;
+let uiLang = "uk";
+function cleanSettings(s) {
+  s = s && typeof s === "object" ? s : {};
+  return {
+    scale: UI_SCALES.indexOf(s.scale) >= 0 ? s.scale : 1,
+    theme: UI_THEMES.indexOf(s.theme) >= 0 ? s.theme : "system",
+    lang: UI_LANGS.indexOf(s.lang) >= 0 ? s.lang : "uk",
+  };
+}
+function cleanChatSize(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  if (typeof v.w !== "number" || typeof v.h !== "number" || !isFinite(v.w) || !isFinite(v.h)) return null;
+  return [Math.min(CHAT_MAX[0], Math.max(CHAT_MIN[0], v.w)), Math.min(CHAT_MAX[1], Math.max(CHAT_MIN[1], v.h))];
+}
+// {type: "resize", w, h[, done]} from the UI edge zones. Chat mode only.
+// The window grows to the right and down even from the left or top edge,
+// see docs/CHAT.md (Window size).
+async function setChatSize(msg) {
+  if (uiMode !== "chat") return;
+  const size = cleanChatSize(msg);
+  if (!size) return;
+  chatSize = size;
+  resizeUi();
+  if (msg.done) {
+    try { await figma.clientStorage.setAsync(CHAT_SIZE_KEY, { w: size[0], h: size[1] }); } catch (e) { /* storage off */ }
+    await saveChatPos(readPos());
+  }
+}
+// Chat window position, kept per user in WINDOW space {x, y} (px from the
+// Figma window corner, so the same screen spot at any canvas zoom or scroll).
+// There is no window-moved event: chat mode polls getPosition once a second
+// and stores a new spot once it held still for one tick. Older Figma may lack
+// getPosition, reposition or viewport: then nothing happens. See docs/CHAT.md.
+const CHAT_POS_KEY = "figmosha-chat-pos";
+const POS_POLL_MS = 1000;
+let chatPos = null;   // last stored (or restored) chat spot
+let posSeen = null;   // last spot the poll saw
+let posMoved = false; // it moved since the baseline and is not stored yet
+let posTimer = null;
+function cleanChatPos(v) {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  if (typeof v.x !== "number" || typeof v.y !== "number" || !isFinite(v.x) || !isFinite(v.y)) return null;
+  return { x: v.x, y: v.y };
+}
+function readPos() {
+  try {
+    if (typeof figma.ui.getPosition !== "function") return null;
+    const p = figma.ui.getPosition();
+    return cleanChatPos(p && p.windowSpace);
+  } catch (e) { return null; }
+}
+const samePos = (a, b) => !!a && !!b && a.x === b.x && a.y === b.y;
+async function saveChatPos(pos) {
+  if (!pos || samePos(pos, chatPos)) return;
+  chatPos = pos;
+  try { await figma.clientStorage.setAsync(CHAT_POS_KEY, { x: pos.x, y: pos.y }); } catch (e) { /* storage off */ }
+}
+function restoreChatPos() {
+  try {
+    const vp = figma.viewport;
+    if (!chatPos || !vp || !vp.bounds || typeof figma.ui.reposition !== "function") return;
+    const b = vp.bounds, z = vp.zoom;
+    if (!(z > 0) || !isFinite(b.x) || !isFinite(b.y)) return;
+    // Window space starts at the Figma window corner, the canvas viewport
+    // starts lower and to the right (toolbar, left panel). When getPosition
+    // gives both spaces, measure that offset from the current spot, so the
+    // restored spot does not drift by the panel size on every run.
+    let ox = 0, oy = 0;
+    try {
+      const cur = typeof figma.ui.getPosition === "function" ? figma.ui.getPosition() : null;
+      const w = cleanChatPos(cur && cur.windowSpace), c = cleanChatPos(cur && cur.canvasSpace);
+      if (w && c) { ox = w.x - (c.x - b.x) * z; oy = w.y - (c.y - b.y) * z; }
+    } catch (e) { /* old Figma: viewport starts at the window corner */ }
+    const x = Math.min(Math.max(0, ox + b.width * z - 80), Math.max(0, chatPos.x));
+    const y = Math.min(Math.max(0, oy + b.height * z - 40), Math.max(0, chatPos.y));
+    figma.ui.reposition(b.x + (x - ox) / z, b.y + (y - oy) / z);
+  } catch (e) { /* old Figma */ }
+}
+function pollPos() {
+  try {
+    const pos = readPos();
+    if (!pos) return;
+    if (!samePos(pos, posSeen)) { posSeen = pos; posMoved = true; return; }
+    if (!posMoved) return;
+    posMoved = false;
+    return saveChatPos(pos);
+  } catch (e) { /* never break the plugin */ }
+}
+function stopPosPoll() {
+  if (posTimer !== null) { clearInterval(posTimer); posTimer = null; }
+}
+function startPosPoll() {
+  stopPosPoll();
+  posSeen = readPos();
+  posMoved = false;
+  posTimer = setInterval(pollPos, POS_POLL_MS);
+}
+try {
+  if (typeof figma.on === "function") figma.on("close", stopPosPoll);
+} catch (e) { /* old Figma */ }
+function resizeUi() {
+  const [w, hgt] = uiMode === "chat" ? chatSize : UI_MODES[uiMode];
+  figma.ui.resize(Math.round(w * uiScale), Math.round(hgt * uiScale));
+}
+async function setSettings(msg) {
+  const s = cleanSettings(msg);
+  uiScale = s.scale;
+  uiLang = s.lang;
+  resizeUi();
+  try { await figma.clientStorage.setAsync(SETTINGS_KEY, s); } catch (e) { /* storage off */ }
+}
+async function setUiMode(mode, store) {
+  if (!Object.prototype.hasOwnProperty.call(UI_MODES, mode)) return;
+  const wasChat = uiMode === "chat";
+  if (wasChat && mode !== "chat") { stopPosPoll(); await saveChatPos(readPos()); }
+  uiMode = mode;
+  resizeUi();
+  if (mode === "chat" && !wasChat) { restoreChatPos(); startPosPoll(); }
+  if (store) {
+    try { await figma.clientStorage.setAsync(UI_MODE_KEY, mode); } catch (e) { /* storage off */ }
+  }
+  figma.ui.postMessage({ type: "ui-mode", mode });
+}
+// Welcome screen: shown once per Figma FILE, so the flag lives in the file
+// (figma.root pluginData, like figmosha-doc), not in clientStorage. Any
+// non-empty value means seen. If the flag can not be read, it is not shown.
+const WELCOME_KEY = "figmosha-welcome";
+function welcomeSeen() {
+  try { return !!figma.root.getPluginData(WELCOME_KEY); } catch (e) { return true; }
+}
+function welcomeDone() {
+  try { figma.root.setPluginData(WELCOME_KEY, "1"); } catch (e) { /* plugin data off */ }
+}
+// Onboarding: shown once per USER on the very first run at all, so the flag
+// lives in clientStorage (shared by all files). Any truthy value means done.
+// If the flag can not be read, it is not shown (like the welcome).
+const ONBOARD_KEY = "figmosha-onboarded";
+async function onboardingDone() {
+  try { await figma.clientStorage.setAsync(ONBOARD_KEY, 1); } catch (e) { /* storage off */ }
+  // No second intro in a row: this file counts as welcomed too.
+  welcomeDone();
+}
+(async () => {
+  try {
+    let mode = null, stored = null, onboarded = true;
+    try { onboarded = !!(await figma.clientStorage.getAsync(ONBOARD_KEY)); } catch (e) { /* storage off */ }
+    try { mode = await figma.clientStorage.getAsync(UI_MODE_KEY); } catch (e) { /* storage off */ }
+    try { stored = await figma.clientStorage.getAsync(SETTINGS_KEY); } catch (e) { /* storage off */ }
+    let size = null;
+    try { size = cleanChatSize(await figma.clientStorage.getAsync(CHAT_SIZE_KEY)); } catch (e) { /* storage off */ }
+    if (size) chatSize = size;
+    try { chatPos = cleanChatPos(await figma.clientStorage.getAsync(CHAT_POS_KEY)); } catch (e) { /* storage off */ }
+    const s = cleanSettings(stored);
+    uiScale = s.scale;
+    uiLang = s.lang;
+    figma.ui.postMessage({ type: "settings", scale: s.scale, theme: s.theme, lang: s.lang });
+    // Separate messages, so "settings" keeps its old shape for older UIs.
+    // The onboarding comes first and replaces the welcome on its run.
+    const onboarding = !onboarded;
+    figma.ui.postMessage({ type: "onboarding", show: onboarding });
+    const welcome = !onboarding && !welcomeSeen();
+    figma.ui.postMessage({ type: "welcome", show: welcome });
+    // Both screens need the chat size. It is not stored as the user's mode.
+    if (mode === "chat" || welcome || onboarding) await setUiMode("chat", false);
+    else if (uiScale !== 1) resizeUi();
+  } finally {
+    if (typeof figma.ui.show === "function") figma.ui.show();
+  }
+})();
+
+// The update card in the chat: Пропустити hides it for one version only.
+// Kept per user in clientStorage: { update: "2.4.0", rerun: "<plugin build>" }.
+const SKIP_KEY = "figmosha-notice-skip";
+async function readSkips() {
+  let s = null;
+  try { s = await figma.clientStorage.getAsync(SKIP_KEY); } catch (e) { /* storage off */ }
+  return s && typeof s === "object" ? s : {};
+}
+async function postSkips() {
+  const s = await readSkips();
+  figma.ui.postMessage({
+    type: "notice-skips",
+    update: typeof s.update === "string" ? s.update : null,
+    rerun: typeof s.rerun === "string" ? s.rerun : null,
+  });
+}
+async function skipNotice(kind, version) {
+  if ((kind !== "update" && kind !== "rerun") || typeof version !== "string") return;
+  const s = await readSkips();
+  s[kind] = version;
+  try { await figma.clientStorage.setAsync(SKIP_KEY, s); } catch (e) { /* storage off */ }
+}
+postSkips();
 
 function safeStringify(value) {
   if (value === undefined) return null;
@@ -405,10 +623,22 @@ const HELPERS = {
 const ABORTED = new Set();
 
 figma.ui.onmessage = async (msg) => {
-  if (msg.type === "need-identity") { postIdentity(); return; }
+  if (msg.type === "need-identity") { postIdentity(); await postSkips(); return; }
+  if (msg.type === "notice-skip") { await skipNotice(msg.kind, msg.version); return; }
+  if (msg.type === "rerun") {
+    // A plugin cannot restart itself. Close it and say how to run it again.
+    figma.closePlugin(RERUN_HINT[uiLang]);
+    return;
+  }
+  if (msg.type === "ui-mode") { await setUiMode(msg.mode, true); return; }
+  if (msg.type === "settings") { await setSettings(msg); return; }
+  if (msg.type === "welcome-done") { welcomeDone(); return; }
+  if (msg.type === "onboarding-done") { await onboardingDone(); return; }
+  if (msg.type === "resize") { await setChatSize(msg); return; }
   if (msg.type === "open-url") {
-    // The Update button. Only ever the project's GitHub pages.
-    if (typeof msg.url === "string" && msg.url.startsWith("https://github.com/denysosadchyi/figmosha2")) {
+    // The Update button. Only ever the project's GitHub pages: the slash keeps out
+    // look-alike repos such as figmosha2evil.
+    if (typeof msg.url === "string" && msg.url.startsWith("https://github.com/denysosadchyi/figmosha2/")) {
       figma.openExternal(msg.url);
     }
     return;

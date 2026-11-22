@@ -1,4 +1,4 @@
-# Start the Figmosha bridge on native Windows, detached.
+# Start the bridge (Figmosha server) on native Windows, detached.
 #
 # start-bridge.sh needs bash and tmux, which a plain Windows box has neither of;
 # without this the only option is keeping a terminal window open forever.
@@ -82,7 +82,7 @@ $now = Get-BridgePid
 if ($now) {
     Write-Host "bridge listening on http://127.0.0.1:$Port (pid $now)" -ForegroundColor Green
     Write-Host "log: $log"
-    Write-Host "now run the plugin: Figma > Plugins > Development > Figmosha Bridge"
+    Write-Host "now run the plugin: Figma > Plugins > Development > Figmosha"
 } else {
     # Python puts the actual reason (a missing aiohttp, a taken port) on stderr.
     $errLog = Join-Path $root "bridge.err.log"

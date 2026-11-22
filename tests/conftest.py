@@ -4,6 +4,7 @@ The bridge keeps its state in module globals. Without this reset a test that
 pins the Host check, or leaves a plugin registered, leaks into the next test
 file — the fixture used to live in test_bridge.py only.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -24,3 +25,24 @@ def clean_state():
     reset()
     yield
     reset()
+
+
+# ─── slow tests ───────────────────────────────────────────────────────────
+# Mark soak/endurance tests with @pytest.mark.slow. They are skipped unless
+# you pass --slow (or set FIGMOSHA_SLOW=1).
+
+def pytest_addoption(parser):
+    parser.addoption("--slow", action="store_true", help="also run tests marked slow")
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "slow: long soak test, run with --slow")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--slow") or os.environ.get("FIGMOSHA_SLOW") == "1":
+        return
+    skip = pytest.mark.skip(reason="slow test: run with --slow")
+    for item in items:
+        if "slow" in item.keywords:
+            item.add_marker(skip)

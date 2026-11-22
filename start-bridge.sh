@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start (or restart) the Figmosha bridge in the background — macOS / Linux / WSL.
+# Start (or restart) the bridge (Figmosha server) in the background — macOS / Linux / WSL.
 #
 #   bash start-bridge.sh           # start, or restart if it is already running
 #   bash start-bridge.sh --stop    # stop it
@@ -85,7 +85,7 @@ for i in $(seq 1 100); do
     if up; then
         echo "[start-bridge] up on 127.0.0.1:$PORT after $((i * 100))ms ($how)"
         echo "[start-bridge] stop with: bash start-bridge.sh --stop"
-        echo "[start-bridge] now run the plugin: Figma > Plugins > Development > Figmosha Bridge"
+        echo "[start-bridge] now run the plugin: Figma > Plugins > Development > Figmosha"
         exit 0
     fi
     sleep 0.1

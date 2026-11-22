@@ -143,7 +143,7 @@ If the bridge isn't running: `bash start-bridge.sh` on macOS / Linux / WSL (log
 `/tmp/figmosha-bridge.log`), or `.\start-bridge.ps1` on native Windows (log `bridge.out.log`).
 See [Running the bridge](#running-the-bridge).
 
-If the plugin isn't connected: tell the user — `Plugins → Development → Figmosha Bridge → Run`.
+If the plugin isn't connected: tell the user — `Plugins → Development → Figmosha → Run`.
 
 ## Helpers (available as `h.*` in every exec)
 
@@ -319,6 +319,11 @@ Setup, once: `python -m venv venv`, then `pip install -r requirements.txt` with 
 (`./venv/bin/pip` on macOS / Linux / WSL, `.\venv\Scripts\pip` on Windows). Tests need
 `requirements-dev.txt`.
 
+The plugin chat needs an agent on the bridge computer: Claude Code (`npm install -g
+@anthropic-ai/claude-code`) or Codex (`npm install -g @openai/codex`), logged in once in a terminal.
+The bridge finds them by itself (`FIGMOSHA_CLAUDE` / `FIGMOSHA_CODEX` override the command);
+the provider, the model and the effort are picked in the plugin settings (docs/CHAT.md, Providers).
+
 **macOS / Linux / WSL**
 
 ```bash
@@ -351,16 +356,16 @@ Windows gotchas, all hit in practice:
 
 **Where Figma loads the plugin from.** Import `plugin/manifest.json` straight from the repo, and Figma
 reads `plugin/` in place — an edit is live after a re-Run, with **no copy step**. The exception is a
-bridge inside WSL: Figma needs a Windows path, so `plugin/` is copied out (README → Install → WSL2).
+bridge inside WSL: Figma needs a Windows path, so `plugin/` is copied out (docs/DEVELOPERS.md → Install → WSL2).
 Record anything machine-specific (paths, copies, hooks) in `CLAUDE.local.md`.
 
 The plugin must be started by hand **once per open file (tab or window — either works)**; `⌘⌥P`
 (`Ctrl+Alt+P` on Windows) re-runs the last plugin in the tab you are on.
 
 After editing `plugin/code.js` or `plugin/ui.html`: **bump `PLUGIN_VERSION`** at the top of
-`plugin/code.js` (date + counter, e.g. `2026-10-02.2`) and run `pytest tests/test_plugin_version.py` — it
-prints the line to add to `tests/plugin_fingerprint.json`, and fails if you forget the bump. Then ask the
-user to re-Run the plugin (Plugins → Development → Figmosha Bridge). After editing
+`plugin/code.js` (date + counter, e.g. `2026-10-02.2`). `python3 tools/bump_plugin.py` does it. The
+pre-commit hook does it for you on every commit that touches those files; enable it once per clone
+with `git config core.hooksPath tools`. Then ask the user to re-Run the plugin (Plugins → Development → Figmosha). After editing
 `plugin/manifest.json` (e.g. adding a permission): ask them to **re-import** it (Plugins → Development →
 Manage plugins → remove, then Import from `plugin/manifest.json`).
 
@@ -374,7 +379,23 @@ the user — don't keep working against old code.
 is newer than its `VERSION`, `/status` has `update: {latest, current, url}`, `/exec` replies carry a
 `notice`, the plugin bar shows "New version X.Y.Z" with an Update button (opens the release notes), and
 `doctor` prints a `!` line. Mention it to the user once; updating is `git pull`, restart the bridge,
-re-run the plugin. Off with `FIGMOSHA_NO_UPDATE_CHECK=1`.
+re-run the plugin. Off with `FIGMOSHA_NO_UPDATE_CHECK=1`. In chat mode the same offer (or the re-run
+request) is a card at the end of the chat with Оновити / Пропустити; a skip lasts for that version only.
+To see it without a real release, start the bridge with `FIGMOSHA_FAKE_LATEST=9.9.9` (shown ~5 s later).
+
+## Testing
+
+Run `pytest -q` (Node and jsdom for the `*.test.js` suites; `JSDOM=/path/to/node_modules/jsdom`).
+`pytest --slow` (or `FIGMOSHA_SLOW=1`) also runs the soak tests.
+
+- One file per area (`test_bridge.py`, `test_chat.py`, `chat_dom.test.js`, `scroll_dom.test.js`...).
+  Add a check to the file of its area. No `cov_`, `edge`, `release` or one-off files.
+- Test behaviour, not looks: no exact px, hex, radius, icon markup or full message text. Compare
+  texts with `chat.tr(...)` or the language, not a copied string. `colors_lint.test.js` is the one
+  style rule: no raw colors outside the token blocks.
+- No tests for one-off events (a release, a rename, a single bug report).
+- No real sleep over 100 ms. Use a fake clock (see `position_code.test.js`, `scroll_dom.test.js`).
+- Slow tests get `@pytest.mark.slow`.
 
 ## Releasing — every update ships as a release
 

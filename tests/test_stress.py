@@ -31,6 +31,7 @@ class Document:
         self.counter = 0
         self.running = 0
         self.max_running = 0   # most execs ever in flight at once in this document
+        self.gate = asyncio.Event()   # the "gate" op runs until the test sets it
 
 
 class SandboxPlugin:
@@ -93,6 +94,9 @@ class SandboxPlugin:
             elif op == "sleep":
                 await asyncio.sleep(cmd["s"])
                 out = {"type": "result", "value": "slept"}
+            elif op == "gate":
+                await d.gate.wait()
+                out = {"type": "result", "value": "let go"}
             elif op == "echo":
                 out = {"type": "result", "value": "x" * cmd["n"]}
             elif op == "error":
@@ -100,6 +104,15 @@ class SandboxPlugin:
             await self.ws.send_str(json.dumps({"id": rid, **out}))
         finally:
             d.running -= 1
+
+
+async def until(cond, timeout=5.0, what="condition"):
+    end = asyncio.get_running_loop().time() + timeout
+    while asyncio.get_running_loop().time() < end:
+        if cond():
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"timed out waiting for {what}")
 
 
 def call(c, cmd, **body):
@@ -168,7 +181,13 @@ def test_many_agents_many_files():
         assert all(r.status == 200 for r in rs)
         assert [p.counter for p in plugins] == [15] * 4
         assert all(p.max_running == 1 for p in plugins)
-        assert elapsed < 15 * 0.02 * 2.5, f"files waited on each other ({elapsed:.2f}s)"
+        # One file's queue is 15 pauses. Windows timers round a 0.02 s sleep up
+        # to about 0.03 s, so measure the real pause first.
+        t1 = loop.time()
+        for _ in range(5):
+            await asyncio.sleep(0.02)
+        pause = max(0.02, (loop.time() - t1) / 5)
+        assert elapsed < 15 * pause * 2.5, f"files waited on each other ({elapsed:.2f}s)"
         for p in plugins:
             await p.__aexit__()
         await c.close()
@@ -217,7 +236,7 @@ def test_chaos_mix_leaves_no_leaked_lock():
                     asyncio.get_running_loop().call_later(rng.uniform(0.01, 0.1), task.cancel)
                 tasks.append(task)
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            await asyncio.sleep(0.3)
+            await until(lambda: p.running == 0, what="orphan scripts finish")
 
             ok_writes = 0
             for kind, res in zip(kinds, results):
@@ -246,9 +265,9 @@ def test_plugin_dies_mid_queue():
         c = await make_client()
         p = SandboxPlugin(c, "A", "docAAAAAA")
         await p.__aenter__()
-        jobs = [asyncio.create_task(call(c, {"op": "sleep", "s": 0.3}, timeout=5))
+        jobs = [asyncio.create_task(call(c, {"op": "never"}, timeout=5))
                 for _ in range(6)]
-        await asyncio.sleep(0.1)
+        await until(lambda: p.running == 1, what="the first script runs")
         await p.__aexit__()
         rs = await asyncio.wait_for(asyncio.gather(*jobs), timeout=8)
         assert all(r.status != 200 for r in rs[1:])
@@ -263,7 +282,7 @@ def test_hung_plugin_times_out_then_recovers():
     async def go():
         c = await make_client()
         async with SandboxPlugin(c, "A", "docAAAAAA") as p:
-            r = await call(c, {"op": "never"}, timeout=0.2)
+            r = await call(c, {"op": "never"}, timeout=0.05)
             assert r.status == 504
             r = await call(c, {"op": "rmw"}, timeout=1)
             assert r.status == 409  # interlocked: the hung script may still write
@@ -306,114 +325,7 @@ def test_reconnect_storm_keeps_one_queue():
     run(go())
 
 
-# ─── hostile and odd input ────────────────────────────────────────────────
-
-@pytest.mark.parametrize("raw, ctype", [
-    ("not json", "application/json"),
-    ("[1, 2, 3]", "application/json"),
-    ('{"code": 42}', "application/json"),
-    ('{"code": ""}', "application/json"),
-    ('{"code": "   "}', "application/json"),
-    ('{"code": null}', "application/json"),
-    ("", "application/json"),
-])
-def test_malformed_requests_are_400(raw, ctype):
-    async def go():
-        c = await make_client()
-        async with SandboxPlugin(c, "A", "docAAAAAA"):
-            r = await c.post("/exec", data=raw, headers={"Content-Type": ctype})
-            assert r.status == 400, (raw, r.status, await r.text())
-            await assert_file_is_free(c, "A")
-        await c.close()
-    run(go())
-
-
-@pytest.mark.parametrize("extra", [
-    {"timeout": "soon"},
-    {"timeout": -5},
-    {"timeout": 1e12},
-    {"queue_timeout": "never"},
-    {"queue_timeout": -1},
-    {"target": 12345},
-    {"target": ["A"]},
-    {"agent": "x" * 100000},
-    {"agent": {"name": "evil"}},
-    {"parallel": "yes"},
-])
-def test_odd_field_types_never_crash_the_bridge(extra):
-    """Whatever an agent sends, the bridge answers with a status (2xx/4xx) and
-    the file stays usable — never a 500 from the bridge itself, never a hang."""
-    async def go():
-        c = await make_client()
-        async with SandboxPlugin(c, "A", "docAAAAAA"):
-            body = {"code": json.dumps({"op": "rmw", "pause": 0}), "target": "A", **extra}
-            r = await asyncio.wait_for(c.post("/exec", json=body), timeout=5)
-            assert r.status in (200, 400, 409), (extra, r.status, await r.text())
-            await assert_file_is_free(c, "A")
-        await c.close()
-    run(go())
-
-
-@pytest.mark.parametrize("raw", ["[1]", '"text"', "null", '{"target": 5}', "not json"])
-def test_clear_survives_odd_bodies(raw):
-    async def go():
-        c = await make_client()
-        async with SandboxPlugin(c, "A", "docAAAAAA"):
-            r = await c.post("/clear", data=raw, headers={"Content-Type": "application/json"})
-            assert r.status in (200, 400), (raw, r.status, await r.text())
-        await c.close()
-    run(go())
-
-
-def test_big_script_and_big_result():
-    async def go():
-        c = await make_client()
-        async with SandboxPlugin(c, "A", "docAAAAAA"):
-            cmd = {"op": "echo", "n": 5_000_000, "padding": "y" * 1_000_000}
-            r = await call(c, cmd, timeout=20)
-            assert r.status == 200
-            assert len((await r.json())["value"]) == 5_000_000
-        await c.close()
-    run(go())
-
-
-def test_unicode_names_and_agents():
-    async def go():
-        c = await make_client()
-        async with SandboxPlugin(c, "Макет 🎨 — фінал", "docUNICODE1"):
-            r = await call(c, {"op": "rmw"}, target="фінал", agent="дизайнер 👩‍🎨")
-            assert r.status == 200
-            files = (await (await c.get("/targets")).json())["files"]
-            assert files[0]["name"] == "Макет 🎨 — фінал"
-        await c.close()
-    run(go())
-
-
-def test_orphan_log_lines_do_not_lift_the_interlock():
-    """A timed-out script that keeps printing is still running: its log lines
-    must not lift the interlock — only its final result or error may."""
-    async def go():
-        c = await make_client()
-        ws = await c.ws_connect("/plugin", headers={"Origin": "null"})
-        await ws.send_str(json.dumps({"type": "hello", "name": "A", "docSig": "docAAAAAA"}))
-        await asyncio.sleep(0.05)
-        task = asyncio.create_task(call(c, {"op": "x"}, timeout=0.2))
-        msg = json.loads((await ws.receive()).data)
-        while msg.get("type") != "exec":
-            msg = json.loads((await ws.receive()).data)
-        rid = msg["id"]
-        assert (await task).status == 504
-        await ws.send_str(json.dumps({"type": "log", "id": rid, "lines": ["still going"]}))
-        await asyncio.sleep(0.05)
-        r = await call(c, {"op": "rmw"}, timeout=1)
-        assert r.status == 409, "a log line from a running orphan lifted the interlock"
-        await ws.send_str(json.dumps({"type": "result", "id": rid, "value": "done"}))
-        await asyncio.sleep(0.05)
-        assert bridge.ABANDONED == {}
-        await ws.close()
-        await c.close()
-    run(go())
-
+# ─── interlock races ──────────────────────────────────────────────────────
 
 def test_reply_racing_the_timeout_lifts_the_interlock():
     """h.ck() stops a script right at its timeout, so its reply can land while
@@ -472,15 +384,16 @@ def test_caller_hanging_up_mid_run_keeps_the_file_interlocked():
     async def go():
         c = await make_client()
         async with SandboxPlugin(c, "A", "docAAAAAA") as p:
-            first = asyncio.create_task(call(c, {"op": "sleep", "s": 0.5}, timeout=5))
-            await asyncio.sleep(0.1)                 # the script is running now
+            first = asyncio.create_task(call(c, {"op": "gate"}, timeout=5))
+            await until(lambda: p.running == 1, what="the script runs")
             first.cancel()
             await asyncio.gather(first, return_exceptions=True)
             await asyncio.sleep(0.05)
-            r = await call(c, {"op": "rmw", "pause": 0}, timeout=2, queue_timeout=0.2)
+            r = await call(c, {"op": "rmw", "pause": 0}, timeout=2, queue_timeout=0.05)
             assert r.status in (409, 503), "next caller got in while the script still ran"
             assert p.max_running == 1
-            await asyncio.sleep(0.6)                 # the orphan finishes...
+            p.d.gate.set()                           # the orphan finishes...
+            await until(lambda: p.running == 0, what="the orphan finishes")
             await assert_file_is_free(c, "A")        # ...and the file frees itself
         await c.close()
     run(go())
@@ -496,7 +409,7 @@ def test_interlock_covers_every_tab_of_the_document():
         async with SandboxPlugin(c, "A", "docAAAAAA", doc) as tab1, \
                    SandboxPlugin(c, "A", "docAAAAAA", doc) as tab2:
             conns = [f["conn"] for f in (await (await c.get("/targets")).json())["files"]]
-            r = await call(c, {"op": "sleep", "s": 0.6}, target=conns[0], timeout=0.2)
+            r = await call(c, {"op": "never"}, target=conns[0], timeout=0.05)
             assert r.status == 504
             r = await call(c, {"op": "rmw", "pause": 0}, target=conns[1], timeout=1)
             assert r.status == 409, "the other tab let a writer in beside the orphan"

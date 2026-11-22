@@ -8,46 +8,43 @@
     font-family: system-ui, -apple-system, sans-serif;
     margin: 0;
     display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--sunken);
+    color: var(--text);
+  }
+  /* The header stays neutral in every state: only the status icon has color. */
+  #bar {
+    flex: none;
+    height: 28px;
+    display: flex;
     align-items: center;
-    justify-content: flex-start;
     gap: 6px;
-    padding: 0 8px;
+    padding: 0 4px 0 8px;
     font-size: 12px;
     font-weight: 600;
     line-height: 1;
-    color: #fff;
-    background: #e8a317;
-    transition: background 150ms ease;
+    color: var(--text);
+    background: var(--surface);
     overflow: hidden;
   }
-  body.ok      { background: #0fa958; }
-  body.err     { background: #d32f2f; }
-  body.pending { background: #e8a317; }
-  /* The bridge has newer plugin code on disk than this window is running. */
-  body.outdated { background: #7b61ff; }
-  body.multi.outdated #badge { color: #7b61ff; }
+  body.chatmode #bar { box-shadow: inset 0 -1px var(--line); }
   /* A newer Figmosha release is out: "New version 2.4.0" + Update. */
-  body.update { background: #0d99ff; }
   #update {
-    display: none; flex: none; order: 3; margin-left: auto;
+    display: none; flex: none;
     padding: 2px 8px; border: 0; border-radius: 999px;
-    background: #fff; color: #0d99ff;
+    background: var(--accent-soft); color: var(--accent);
     font: inherit; font-size: 10px; font-weight: 700; line-height: 1.2;
     cursor: pointer;
   }
+  #update:hover { background: var(--accent-soft-hover); }
   body.update #update { display: block; }
-  body.update #badge { display: none; }
 
   #status { min-width: 0; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  /* With 2+ files connected the icon and "1/2" sit together in a white pill. */
-  #fileicon { flex: none; width: 8px; height: 12px; display: block; }
-  /* Name on the left, icon / pill pushed to the right edge. */
-  #badge { display: flex; align-items: center; gap: 3px; flex: none; order: 2; margin-left: auto; }
-  body.multi #badge {
-    padding: 2px 2px 2px 5px; border-radius: 999px;
-    background: #fff; color: #0fa958;
-  }
-  body.multi.err #badge { color: #d32f2f; }
+  #fileicon { flex: none; width: 8px; height: 12px; display: block; color: var(--faint); }
+  /* Status icon (and "1/2" with 2+ files) pushed to the right, before the buttons. */
+  #badge { display: flex; align-items: center; gap: 3px; flex: none; margin-left: auto; }
+  body.multi #badge { padding: 2px 2px 2px 5px; border-radius: 999px; background: var(--well); color: var(--muted); }
   body.multi #icon { font-size: 13px; }
   #peers {
     display: none;
@@ -57,15 +54,607 @@
   body.multi #peers { display: block; }
   #icon { display: flex; font-size: 16px; flex: none; }
   #icon svg { display: block; }
-  body.pending #icon, body.busy #icon { animation: spin 1.1s linear infinite; }
+  #icon.st-ok     { color: var(--ok); }
+  #icon.st-busy   { color: var(--warn); }
+  #icon.st-err    { color: var(--err); }
+  #icon.st-update { color: var(--info); }
+  #icon.st-conn   { color: var(--faint); }
+  #icon.st-busy, #icon.st-conn { animation: spin 1.1s linear infinite; }
+  /* Buttons on the right edge of the header, in one row. */
+  #barActions { display: flex; align-items: center; gap: 2px; flex: none; }
   @keyframes spin { to { transform: rotate(360deg); } }
+  /* ── chat: the board chat design, inside the plugin window ── */
+  :root { --r-window:12px; --r-lg:10px; --r-md:8px; --r-sm:6px;
+    --surface:#fff; --raised:#fff; --sunken:#f4f4f6; --hover:#f4f4f6; --line:#e8e8ec; --line2:#dcdce1;
+          --text:#1b1b1f; --muted:#6b6f76; --faint:#8a8d95; --bubble:#fff; --bubble-me:#fff;
+          --accent:#2f6af5; --accent-soft:#ebf0fe; --accent-soft-hover:#dce5fd; --accent-fill:#2f6af5; --on-accent:#fff;
+          --ok:#2f9e6b; --ok-soft:#e9f6ef; --warn:#d18a00; --info:#0d8ce0; --err:#d64545; --err-soft:#fcecec; --err-line:#f1caca;
+          --bubble-shadow:0 1px 1px rgba(0,0,0,.04), 0 1px 4px rgba(0,0,0,.04);
+          --compose-shadow:0 4px 12px rgba(0,0,0,.03), 0 16px 56px rgba(0,0,0,.06);
+          --pop-shadow:0 4px 12px rgba(0,0,0,.06), 0 16px 56px rgba(0,0,0,.1);
+          --scrim:rgba(0,0,0,.6); --on-scrim:#fff; --glow-a:#2f6af5; --glow-b:#14c28a;
+          --well:#f4f4f6; --well-me:#f4f4f6;
+          --toast-bg:#1b1b1f; --toast-fg:#fff; --toast-ring:none;
+          --primary-focus:0 2px 6px rgba(47,106,245,.35); }
+  /* Dark set: on when the theme is Dark, or System in a dark Figma (the settings script sets the class). */
+  /* Figma UI3 dark: neutral greys, Figma blue. Borders, not shadows. Plain hex, not --figma-color-*,
+     because Dark can be picked while Figma itself is light. */
+  :root.dark { --surface:#2c2c2c; --raised:#2c2c2c; --sunken:#1e1e1e; --hover:#383838; --line:#444444; --line2:#545454;
+          --text:#ffffff; --muted:#b3b3b3; --faint:#999999; --bubble:#2c2c2c; --bubble-me:#383838;
+          --accent:#0d99ff; --accent-soft:#1f3a52; --accent-soft-hover:#26496a; --accent-fill:#0a6dc2; --on-accent:#ffffff;
+          --ok:#79d297; --ok-soft:#1d3327; --warn:#f7d15f; --info:#7cc4f8; --err:#fca397; --err-soft:#3d2622; --err-line:#6b3a31;
+          --bubble-shadow:none;
+          --compose-shadow:0 0 0 1px #444444; --pop-shadow:0 2px 8px rgba(0,0,0,.35);
+          --scrim:rgba(0,0,0,.6); --on-scrim:#ffffff; --glow-a:#0d99ff; --glow-b:#14ae5c;
+          --well:#383838; --well-me:#444444;
+          --toast-bg:#383838; --toast-fg:#ffffff; --toast-ring:0 0 0 1px #545454, 0 2px 8px rgba(0,0,0,.35);
+          --primary-focus:0 2px 8px rgba(13,153,255,.4); color-scheme:dark; }
+  /* Interface scale from the settings page. code.js resizes the window by the same factor. */
+  html { zoom:var(--ui-scale, 1); }
+
+  /* chat icon in the bar: opens the chat, and closes it back to the bar */
+  #chatbtn { flex:none; position:relative; width:22px; height:22px; padding:0; border:0; border-radius:50%;
+             display:inline-flex; align-items:center; justify-content:center; background:transparent; color:var(--muted); cursor:pointer; }
+  #chatbtn svg { width:16px; height:16px; }
+  #chatbtn:hover { background:var(--hover); color:var(--text); }
+  #chatbtn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  body.chatmode #chatbtn { background:var(--accent-soft); color:var(--accent); }
+  #chatbtn i { position:absolute; top:1px; right:1px; width:7px; height:7px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 1.5px var(--surface); display:none; }
+  body.unread #chatbtn i { display:block; }
+  body.cbusy:not(.chatmode) #chatbtn i { display:block; animation:cpulse 1.2s ease-in-out infinite; }
+  @keyframes cpulse { 50% { opacity:.3; } }
+  /* settings icon next to the chat icon, only in chat mode */
+  #setbtn { display:none; flex:none; width:22px; height:22px; padding:0; border:0; border-radius:50%;
+            align-items:center; justify-content:center; background:transparent; color:var(--muted); cursor:pointer; }
+  body.chatmode #setbtn { display:inline-flex; }
+  #setbtn svg { width:16px; height:16px; }
+  #setbtn:hover { background:var(--hover); color:var(--text); }
+  #setbtn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  html.settings-open #setbtn { background:var(--accent-soft); color:var(--accent); }
+  html.settings-open body.chatmode #chatbtn { background:transparent; color:var(--muted); }
+
+  /* settings page: replaces the chat while open */
+  #settings { display:none; flex:1; min-height:0; flex-direction:column; padding:8px 12px 16px; overflow-y:auto; font-size:13px; color:var(--text); background:var(--surface); }
+  html.settings-open body.chatmode #settings { display:flex; }
+  html.settings-open #chat { display:none !important; }
+  .shead { display:flex; align-items:center; gap:4px; margin-bottom:8px; }
+  .shead h2 { margin:0; font-size:14px; font-weight:600; }
+  #sBack { flex:none; width:32px; height:32px; padding:0; border:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; background:transparent; color:var(--muted); cursor:pointer; }
+  #sBack:hover { color:var(--text); background:var(--hover); }
+  #sBack svg { width:18px; height:18px; }
+  #sBack:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  /* One row per setting: the label left, a dropdown right. No cards: a plain list on the page,
+     split by a 1px line. The line is the top border of every shown row after the first shown one,
+     so a hidden row never doubles it. */
+  .srow { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:40px; padding:4px 0; }
+  .srow[hidden] { display:none; }
+  .srow:not([hidden]) ~ .srow:not([hidden]) { border-top-width:1px; border-top-style:solid; border-top-color:var(--line); }
+  .srow h3 { flex:1 1 auto; min-width:0; margin:0; font-size:13px; font-weight:500; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  /* Dropdowns: native select, a CSS chevron on the wrapper, at most 60% of the row. */
+  .dd { position:relative; display:block; flex:0 1 auto; min-width:0; max-width:60%; }
+  .dd::after { content:""; position:absolute; right:12px; top:50%; width:6px; height:6px; margin-top:-5px; border-right:1.5px solid var(--muted); border-bottom:1.5px solid var(--muted); transform:rotate(45deg); pointer-events:none; }
+  .dd select { -webkit-appearance:none; appearance:none; display:block; width:auto; max-width:100%; height:30px; margin:0; padding:0 30px 0 10px; border:0; border-radius:var(--r-md); background:var(--sunken); color:var(--text); font:inherit; font-size:12px; font-weight:500; cursor:pointer; text-overflow:ellipsis; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .dd select:hover { background:var(--hover); }
+  .dd select:focus { outline:none; }
+  .dd select:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .dd select option { background:var(--surface); color:var(--text); }
+  .dd select option:disabled { color:var(--faint); }
+  /* no agent on the bridge computer: this card stands where the composer would be */
+  #cNoAgent { display:none; position:relative; z-index:2; margin:0 8px 8px; flex-direction:column; gap:8px; padding:12px; border-radius:var(--r-lg); background:var(--raised); box-shadow:var(--compose-shadow); font-size:12px; line-height:1.4; color:var(--text); }
+  #cNoAgent h3 { margin:0; font-size:13px; font-weight:600; }
+  #cNoAgent p { margin:0; color:var(--muted); }
+  #cNoAgent .nrow { display:flex; flex-direction:column; gap:4px; }
+  #cNoAgent .nrow b { font-weight:600; }
+  #cNoAgent code { display:block; font:11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:6px 8px; border-radius:var(--r-md); background:var(--well); overflow-wrap:anywhere; user-select:all; }
+  #cNoAgent .nbtn { align-self:flex-start; }
+
+  #chat { display:none; flex:1; min-height:0; position:relative; flex-direction:column; font-size:13px; font-weight:400; color:var(--text); background:var(--sunken); }
+  body.chatmode #chat { display:flex; }
+  .msgs { flex:1; overflow-y:auto; padding:12px 12px 16px; display:flex; flex-direction:column; gap:4px; overscroll-behavior:contain; }
+  .hint { margin:auto 16px; text-align:center; color:var(--muted); font-size:13px; line-height:1.5; }
+  .mrow { display:flex; flex-direction:column; gap:4px; max-width:85%; }
+  .mrow.me { align-self:flex-end; align-items:flex-end; }
+  .mrow.claude, .mrow.system { align-self:flex-start; align-items:flex-start; }
+  .mrow.me + .mrow.claude, .mrow.claude + .mrow.me, .mrow.system + .mrow.me, .mrow.me + .mrow.system { margin-top:12px; }
+  .msg { max-width:100%; padding:8px 12px; border-radius:var(--r-lg); font-size:13px; line-height:1.45; overflow-wrap:anywhere; background:var(--bubble); box-shadow:var(--bubble-shadow); }
+  .msg.me { background:var(--bubble-me); --well:var(--well-me); }
+  .msg.system { background:var(--err-soft); color:var(--err); box-shadow:none; border:1px solid var(--err-line); border-radius:var(--r-md); }
+  .msg.system.info { background:var(--surface); color:var(--muted); border-color:var(--line); }
+  .msg a { color:inherit; text-decoration:underline; text-underline-offset:2px; }
+  .msg code { font:12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding:1px 4px; border-radius:4px; background:var(--well); }
+  .msg pre { margin:6px 0; padding:8px 10px; border-radius:var(--r-sm); background:var(--well); font:12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
+  /* headings: compact, they fit the narrow bubble */
+  .msg .mh { margin:8px 0 2px; font-size:13px; font-weight:700; line-height:1.35; }
+  .msg .mh:first-child { margin-top:0; }
+  .msg .mh[aria-level="1"], .msg .mh[aria-level="2"] { font-size:14px; }
+  /* tables scroll sideways inside the bubble */
+  .msg .mtable { margin:6px 0; max-width:100%; overflow-x:auto; border:1px solid var(--line); border-radius:var(--r-sm); scrollbar-width:thin; }
+  .msg .mtable table { border-collapse:collapse; font-size:12px; line-height:1.35; }
+  .msg .mtable th, .msg .mtable td { padding:4px 8px; border-bottom:1px solid var(--line); border-right:1px solid var(--line); text-align:left; vertical-align:top; overflow-wrap:normal; }
+  .msg .mtable th { white-space:nowrap; }
+  .msg .mtable td { min-width:48px; max-width:240px; }
+  .msg .mtable th:last-child, .msg .mtable td:last-child { border-right:0; }
+  .msg .mtable tbody tr:last-child td { border-bottom:0; }
+  .msg .mtable th { font-weight:600; background:var(--well); }
+  .msg .mtable code { font-size:11px; }
+  .msg.stream::after { content:""; display:inline-block; width:6px; height:13px; margin-left:2px; vertical-align:-2px; border-radius:1px; background:var(--accent); animation:cpulse 1s ease-in-out infinite; }
+  .mfoot { display:flex; align-items:center; gap:2px; }
+  .mrow.me .mfoot { flex-direction:row-reverse; }
+  .meta { font-size:11px; color:var(--faint); white-space:nowrap; padding:0 4px; font-variant-numeric:tabular-nums; }
+  .qbtn { flex:none; width:24px; height:24px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--faint); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; opacity:0; }
+  .qbtn svg { width:15px; height:15px; }
+  .mrow:hover .qbtn, .qbtn:focus-visible { opacity:.8; }
+  .qbtn:hover { color:var(--accent); opacity:1; background:var(--surface); }
+  .mq { display:block; width:100%; margin:0 0 6px; padding:6px 10px; border:0; border-radius:var(--r-sm); background:var(--sunken); color:var(--muted); font:inherit; font-size:12px; line-height:1.4; text-align:left; cursor:pointer; }
+  .mq b { display:block; color:var(--accent); font-weight:600; }
+  .mq span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .mrow.flash .msg { box-shadow:0 0 0 2px var(--accent); transition:box-shadow .2s; }
+  .mimg { display:block; max-width:220px; max-height:280px; border-radius:var(--r-md); background:var(--surface); }
+  /* actions: A/B/C buttons in a column, only under the last reply */
+  .mrow:has(.acts) { width:85%; } .msg:has(.acts) { width:100%; }
+  .acts { display:grid; grid-template-columns:1fr; gap:8px; margin:12px 0 4px; }
+  .act { font:inherit; font-size:13px; line-height:1.3; text-align:left; display:flex; align-items:center; gap:10px; padding:8px 12px 8px 8px; border:1px solid var(--line2); border-radius:var(--r-md); cursor:pointer; background:var(--surface); color:var(--text); }
+  .act .ak { flex:none; width:24px; height:24px; border-radius:50%; display:grid; place-items:center; background:var(--well); color:var(--muted); font-size:12px; font-weight:600; }
+  .act:hover { background:var(--accent-soft); border-color:var(--accent-soft); }
+  .act:hover .ak { background:var(--accent-fill); color:var(--on-accent); }
+  .act:disabled { opacity:.5; cursor:default; }
+  .act:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  /* questions: each question has its own answer field */
+  .mrow:has(.qs) { width:92%; max-width:92%; } .msg:has(.qs) { width:100%; }
+  .qs { display:flex; flex-direction:column; gap:8px; margin:12px 0 4px; }
+  .qs-head { display:flex; align-items:center; gap:10px; font-size:12px; color:var(--muted); }
+  .qs-head i { position:relative; flex:1; height:4px; border-radius:2px; overflow:hidden; background:var(--line2); }
+  .qs-head i::after { content:""; position:absolute; inset:0 auto 0 0; width:calc(var(--p) * 100%); border-radius:2px; background:var(--ok); transition:width .3s; }
+  .qa { padding:10px; border:1px solid var(--line2); border-radius:var(--r-lg); background:var(--surface); }
+  .qa.done { border-color:transparent; background:var(--sunken); }
+  .qq { display:flex; align-items:flex-start; gap:10px; font-size:13px; line-height:1.45; }
+  .qq > span:last-child { flex:1; min-width:0; padding-top:2px; overflow-wrap:anywhere; }
+  .qn { flex:none; display:grid; place-items:center; width:24px; height:24px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:12px; font-weight:600; }
+  .qn svg { width:14px; height:14px; }
+  .qa.done .qn { background:var(--ok-soft); color:var(--ok); }
+  .qans { margin:6px 0 0 34px; font-size:13px; line-height:1.45; color:var(--muted); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .qf { display:flex; align-items:flex-end; gap:6px; margin:10px 0 0; padding:4px 4px 4px 12px; border-radius:var(--r-md); background:var(--sunken); }
+  .qf:focus-within { box-shadow:0 0 0 2px var(--accent); }
+  .qf textarea { flex:1; min-width:0; max-height:140px; padding:6px 0; border:0; background:none; color:var(--text); font:inherit; font-size:13px; line-height:1.45; resize:none; outline:none; }
+  .qf.sending { opacity:.6; }
+  .qsend, .send { flex:none; display:grid; place-items:center; padding:0; border:0; border-radius:50%; background:var(--accent-soft); color:var(--accent); cursor:pointer; }
+  .qsend { width:30px; height:30px; } .qsend svg { width:14px; height:14px; }
+  .qsend:hover, .send:hover { background:var(--accent-soft-hover); }
+  .qsend:focus-visible, .send:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  /* compose: floating card at the bottom, with the working line on top while busy */
+  .compose { position:relative; z-index:2; margin:0 8px 8px; display:flex; flex-wrap:wrap; gap:7px 8px; padding:7px; border-radius:var(--r-lg); background:var(--raised); box-shadow:var(--compose-shadow); align-items:flex-end; }
+  .typing { order:-1; width:calc(100% + 14px); display:flex; align-items:center; gap:8px; height:40px; margin:-7px -7px 0; padding:0 8px 0 14px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted); }
+  .typing[hidden] { display:none; }
+  .typing .dots { display:inline-flex; gap:3px; flex:none; }
+  .typing .dots i { width:5px; height:5px; border-radius:50%; background:var(--accent); animation:blink 1.2s ease-in-out infinite; }
+  .typing .dots i:nth-child(2) { animation-delay:.2s; } .typing .dots i:nth-child(3) { animation-delay:.4s; }
+  @keyframes blink { 0%, 80%, 100% { opacity:.25; transform:translateY(0); } 40% { opacity:1; transform:translateY(-2px); } }
+  .typing span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .typing small { color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .stop { flex:none; width:28px; height:28px; padding:0; border:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; color:var(--muted); background:transparent; cursor:pointer; }
+  .stop:hover { color:var(--text); background:var(--hover); }
+  .stop svg { width:18px; height:18px; }
+  .stop:disabled { opacity:.45; cursor:default; }
+  .qbar { width:100%; display:flex; align-items:center; gap:8px; padding:6px 6px 6px 12px; border-radius:var(--r-sm); background:var(--sunken); font-size:12px; line-height:1.4; color:var(--muted); }
+  .qbar[hidden], .att[hidden] { display:none; }
+  .qbar div { flex:1; min-width:0; }
+  .qbar b { display:block; color:var(--accent); font-weight:600; }
+  .qbar span { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .qbar button, .clip { flex:none; width:32px; height:32px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--muted); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+  .qbar button svg { width:16px; height:16px; } .clip svg { width:18px; height:18px; }
+  .clip:hover { color:var(--accent); }
+  .att { width:100%; display:flex; gap:8px; overflow-x:auto; padding:2px 0 4px; }
+  .att .th { position:relative; flex:none; width:56px; height:56px; border-radius:var(--r-sm); overflow:hidden; border:1px solid var(--line); }
+  .att .th img { width:100%; height:100%; object-fit:cover; display:block; }
+  .att .th button { position:absolute; top:2px; right:2px; width:20px; height:20px; padding:0; border:0; border-radius:50%; background:var(--scrim); color:var(--on-scrim); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
+  .att .th button svg { width:13px; height:13px; }
+  .field { flex:1; min-width:0; display:flex; align-items:flex-end; gap:2px; }
+  .field textarea { flex:1; min-width:0; resize:none; font:inherit; font-size:13px; line-height:20px; padding:6px 4px; border:0; background:transparent; color:var(--text); max-height:140px; min-height:32px; outline:none; }
+  .field textarea::placeholder { color:var(--faint); }
+  .send { width:32px; height:32px; } .send svg { width:15px; height:15px; }
+  .send:disabled { opacity:.45; cursor:default; }
+  .glow { position:absolute; z-index:1; left:6%; right:6%; bottom:44px; height:16px; filter:blur(12px); pointer-events:none; opacity:0; transition:opacity .3s; }
+  .glow::before, .glow::after { content:""; position:absolute; top:0; bottom:0; border-radius:50%; }
+  .glow::before { left:0; right:0; opacity:.35; background:linear-gradient(90deg, var(--glow-a), var(--glow-b), var(--glow-a), var(--glow-b), var(--glow-a)) 0 0 / 400% 100%; }
+  .glow::after { left:0; width:40%; background:linear-gradient(90deg, var(--glow-a), var(--glow-b)); }
+  .glow.on { opacity:1; }
+  .glow.on::before { animation:glow-flow 2.4s linear infinite; }
+  .glow.on::after { animation:beam 1.1s cubic-bezier(.45,0,.55,1) infinite alternate; }
+  @keyframes beam { 0% { transform:translateX(0) scaleY(.7); } 50% { transform:translateX(75%) scaleY(1.5); } 100% { transform:translateX(150%) scaleY(.7); } }
+  @keyframes glow-flow { from { background-position:0 0; } to { background-position:66.67% 0; } }
+  /* notice card: a new version is out, or the plugin needs a re-run */
+  .mrow.notice { align-self:stretch; max-width:100%; margin-top:12px; }
+  .hint + .mrow.notice { margin-top:0; }
+  .ncard { padding:10px; border:1px solid var(--line2); border-radius:var(--r-lg); background:var(--surface); }
+  .nhead { display:flex; align-items:flex-start; gap:10px; }
+  .nicon { flex:none; display:grid; place-items:center; width:28px; height:28px; border-radius:50%; background:var(--accent-soft); color:var(--accent); }
+  .nicon svg { width:16px; height:16px; }
+  .ntext { flex:1; min-width:0; padding-top:1px; line-height:1.4; }
+  .ntext b { display:block; font-size:13px; font-weight:600; }
+  .ntext span { display:block; font-size:12px; color:var(--muted); }
+  .nacts { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 0 38px; }
+  .nbtn { font:inherit; font-size:12px; font-weight:600; line-height:1.2; padding:7px 12px; border:1px solid var(--line2); border-radius:999px; background:var(--surface); color:var(--text); cursor:pointer; }
+  .nbtn:hover { background:var(--hover); }
+  .nbtn.primary { padding:8px 13px; border:0; background:var(--accent-fill); color:var(--on-accent); }
+  .nbtn.primary:hover { filter:brightness(1.08); }
+  .nbtn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  /* Accent-filled buttons get the focus from code when a screen opens, and that focus is
+     focus-visible: no outline ring there. The keyboard state is a brighter fill and a soft
+     drop shadow. The transparent outline shows only in forced colors (Windows contrast). */
+  .nbtn.primary:focus { outline:none; }
+  .nbtn.primary:focus-visible { outline:2px solid transparent; outline-offset:0; filter:brightness(1.15); box-shadow:var(--primary-focus); }
+  /* slash commands: a list above the compose box while the input starts with / */
+  .cmds { position:absolute; left:0; right:0; bottom:calc(100% + 6px); max-height:232px; overflow-y:auto; padding:4px; border:1px solid var(--line); border-radius:var(--r-lg); background:var(--raised); box-shadow:var(--pop-shadow); scrollbar-width:thin; }
+  .cmds[hidden] { display:none; }
+  .cmd { display:flex; align-items:baseline; gap:8px; padding:6px 10px; border-radius:var(--r-sm); font-size:13px; line-height:1.35; cursor:pointer; }
+  .cmd b { flex:none; font-weight:600; color:var(--text); }
+  .cmd span { flex:1; min-width:0; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .cmd:hover { background:var(--hover); }
+  .cmd[aria-selected=true] { background:var(--accent-soft); }
+  .cmd[aria-selected=true] b { color:var(--accent); }
+  .toast { position:absolute; z-index:3; top:8px; left:50%; transform:translateX(-50%); max-width:calc(100% - 24px); padding:6px 12px; border-radius:999px; background:var(--toast-bg); color:var(--toast-fg); box-shadow:var(--toast-ring); font-size:12px; line-height:1.4; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; pointer-events:none; opacity:0; transition:opacity .2s; }
+  .toast.on { opacity:1; }
+  /* welcome screen: once per file, in the chat window, before the chat */
+  #welcome { display:none; flex:1; min-height:0; flex-direction:column; gap:14px; padding:14px 16px 0; overflow-y:auto; font-size:13px; color:var(--text); background:var(--sunken); }
+  html.welcome-open body.chatmode #welcome { display:flex; }
+  html.welcome-open #chat, html.welcome-open #settings { display:none !important; }
+  .wart { flex:none; display:grid; place-items:center; height:112px; border-radius:var(--r-window); background:var(--surface); box-shadow:var(--bubble-shadow); overflow:hidden; }
+  .willo { display:block; width:232px; max-width:100%; height:auto; aspect-ratio:232 / 112; animation:wIn .5s cubic-bezier(.2,.7,.2,1) both; }
+  .willo .w-dot { fill:var(--line2); }
+  .willo .w-frame { fill:var(--raised); stroke:var(--line2); stroke-width:1.5; }
+  .willo .w-tag { fill:var(--accent-soft); }
+  .willo .w-soft { fill:var(--sunken); }
+  .willo .w-acc { fill:var(--accent-soft); }
+  .willo .w-sel { fill:none; stroke:var(--accent); stroke-width:1.5; }
+  .willo .w-knob { fill:var(--surface); stroke:var(--accent); stroke-width:1.5; }
+  .willo .w-bub { fill:var(--accent-fill); }
+  .willo .w-line { stroke:var(--on-accent); stroke-width:3; stroke-linecap:round; opacity:.9; }
+  .willo .w-cur { fill:var(--accent-fill); stroke:var(--surface); stroke-width:1.5; stroke-linejoin:round; }
+  .willo .w-spark { fill:var(--accent); }
+  .willo .w-bubg { animation:wPop .45s .25s cubic-bezier(.3,1.4,.5,1) both; transform-origin:156px 74px; }
+  .willo .w-curg { animation:wCur 3.2s .6s ease-in-out infinite; }
+  .whead { display:flex; flex-direction:column; gap:4px; padding:0 2px; }
+  .whead h2 { margin:0; font-size:17px; font-weight:650; line-height:1.3; letter-spacing:-.01em; }
+  .whead p { margin:0; font-size:13px; line-height:1.45; color:var(--muted); }
+  .wlist { margin:0; padding:4px; list-style:none; display:flex; flex-direction:column; border-radius:var(--r-lg); background:var(--surface); box-shadow:var(--bubble-shadow); }
+  .wrow { display:flex; align-items:center; gap:10px; padding:6px 8px; font-size:13px; line-height:1.4; animation:wIn .4s cubic-bezier(.2,.7,.2,1) both; }
+  .wrow + .wrow { box-shadow:inset 0 1px var(--line); }
+  .wrow:nth-child(1) { animation-delay:.08s; } .wrow:nth-child(2) { animation-delay:.13s; } .wrow:nth-child(3) { animation-delay:.18s; }
+  .wrow:nth-child(4) { animation-delay:.23s; } .wrow:nth-child(5) { animation-delay:.28s; }
+  .wico { flex:none; display:grid; place-items:center; width:28px; height:28px; border-radius:var(--r-md); background:var(--accent-soft); color:var(--accent); }
+  .wico svg { width:16px; height:16px; }
+  .wacts { position:sticky; bottom:0; margin-top:auto; display:flex; flex-direction:column; align-items:stretch; gap:4px; padding:8px 0 10px; background:var(--sunken); }
+  .wrow > span:last-child { min-width:0; overflow-wrap:anywhere; }
+  /* the chat composer (#cCompose) moves in here while the welcome is open */
+  .wcomp { position:relative; display:flex; flex-direction:column; }
+  #welcome .compose { margin:0; }
+  #welcome #cNoAgent { margin:0; }
+  html.noagent #cNoAgent { display:flex; }
+  html.noagent #cCompose, html.noagent #cGlow { display:none; }
+  #welcome .toast { top:auto; bottom:calc(100% + 6px); }
+  @keyframes wIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  @keyframes wPop { from { opacity:0; transform:scale(.6); } to { opacity:1; transform:none; } }
+  @keyframes wCur { 0%, 100% { transform:translate(0, 0); } 50% { transform:translate(-5px, -3px); } }
+  @media (prefers-reduced-motion:reduce) { #welcome .willo, #welcome .wrow, .willo .w-bubg, .willo .w-curg { animation:none; } }
+  /* onboarding: once per user, the very first run at all, before the chat and the welcome */
+  #onboard { display:none; flex:1; min-height:0; flex-direction:column; padding:0 16px; overflow-y:auto; font-size:13px; color:var(--text); background:var(--sunken); }
+  html.onboard-open body.chatmode #onboard { display:flex; }
+  html.onboard-open #chat, html.onboard-open #welcome, html.onboard-open #settings { display:none !important; }
+  #onboard .otop { position:sticky; top:0; z-index:1; flex:none; display:flex; align-items:center; justify-content:space-between; gap:8px; padding:10px 0 8px; background:var(--sunken); }
+  .odots { display:flex; align-items:center; gap:6px; padding-left:2px; }
+  .odot { width:6px; height:6px; border-radius:999px; background:var(--line2); transition:width .3s cubic-bezier(.2,.7,.2,1), background-color .3s; }
+  .odot.past { background:color-mix(in srgb, var(--accent) 40%, var(--line2)); }
+  .odot.on { width:20px; background:var(--accent); }
+  #onSkip { padding:4px 8px; margin-right:-8px; border:0; border-radius:var(--r-sm); background:transparent; color:var(--muted); font:inherit; font-size:12px; cursor:pointer; }
+  #onSkip:hover { color:var(--accent); }
+  #onSkip:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .ovh { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .ostep { display:flex; flex-direction:column; gap:14px; padding:2px 0 4px; }
+  .ostep[hidden] { display:none; }
+  .ostep.oin { animation:oIn .34s cubic-bezier(.2,.7,.2,1) both; }
+  .ostep.oin.oback { animation-name:oInBack; }
+  .oart { flex:none; display:grid; place-items:center; height:112px; border-radius:var(--r-window); background:var(--surface); box-shadow:var(--bubble-shadow); overflow:hidden; }
+  .oart .o-link { fill:none; stroke:var(--accent); stroke-width:1.5; stroke-linecap:round; stroke-dasharray:1 4; }
+  .ohead { display:flex; flex-direction:column; gap:4px; padding:0 2px; }
+  .ohead h2 { margin:0; font-size:17px; font-weight:650; line-height:1.3; letter-spacing:-.01em; }
+  .ohead p { margin:0; font-size:13px; line-height:1.45; color:var(--muted); }
+  .ohead .oico { width:36px; height:36px; margin-bottom:6px; border-radius:var(--r-lg); }
+  .ohead .oico svg { width:20px; height:20px; }
+  .olist { margin:0; padding:4px; list-style:none; display:flex; flex-direction:column; border-radius:var(--r-lg); background:var(--surface); box-shadow:var(--bubble-shadow); }
+  .orow { display:flex; align-items:center; gap:10px; padding:6px 8px; font-size:13px; line-height:1.4; animation:oIn .4s cubic-bezier(.2,.7,.2,1) both; }
+  .orow + .orow { box-shadow:inset 0 1px var(--line); }
+  .orow:nth-child(1) { animation-delay:.1s; } .orow:nth-child(2) { animation-delay:.16s; } .orow:nth-child(3) { animation-delay:.22s; }
+  .orow > span:last-child { min-width:0; overflow-wrap:anywhere; }
+  .oico { flex:none; display:grid; place-items:center; width:28px; height:28px; border-radius:var(--r-md); background:var(--accent-soft); color:var(--accent); }
+  .oico svg { width:16px; height:16px; }
+  .ochoices { display:flex; flex-direction:column; gap:6px; }
+  .ochoice { display:flex; align-items:center; gap:10px; width:100%; min-height:46px; padding:8px 12px; border:1px solid var(--line); border-radius:var(--r-lg); background:var(--surface); color:var(--text); font:inherit; font-size:13px; font-weight:500; text-align:left; cursor:pointer; transition:border-color .15s, background-color .15s; }
+  .ochoice::after { content:""; flex:none; margin-left:auto; width:16px; height:16px; border-radius:50%; box-shadow:inset 0 0 0 1.5px var(--line2); transition:box-shadow .15s; }
+  .ochoice:hover { border-color:var(--line2); }
+  .ochoice[aria-checked="true"] { border-color:var(--accent); background:var(--accent-soft); font-weight:600; }
+  .ochoice[aria-checked="true"]::after { box-shadow:inset 0 0 0 5px var(--accent); }
+  .ochoice .oico { width:28px; height:28px; background:var(--well); color:var(--muted); }
+  .ochoice[aria-checked="true"] .oico { background:var(--surface); color:var(--accent); }
+  .ochoice:focus-visible, .oseg button:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .oseg { display:grid; grid-template-columns:repeat(4, minmax(0, 1fr)); gap:6px; }
+  .oseg button { display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:8px; height:80px; padding:8px 4px 10px; border:1px solid var(--line); border-radius:var(--r-lg); background:var(--surface); color:var(--muted); font:inherit; font-size:12px; font-weight:500; font-variant-numeric:tabular-nums; cursor:pointer; transition:border-color .15s, background-color .15s; }
+  .oseg button::before { content:"Aa"; content:"Aa" / ""; font-size:calc(20px * var(--k, 1)); font-weight:650; line-height:1; letter-spacing:-.01em; color:var(--text); }
+  .oseg button:hover { border-color:var(--line2); }
+  .oseg button[aria-checked="true"] { border-color:var(--accent); background:var(--accent-soft); color:var(--accent); font-weight:600; }
+  .onote { display:flex; align-items:center; gap:8px; margin:0; padding:0 2px; font-size:12px; line-height:1.4; color:var(--muted); }
+  .onote svg { flex:none; width:16px; height:16px; }
+  .oacts { position:sticky; bottom:0; flex:none; margin-top:auto; display:flex; gap:8px; padding:12px 0 14px; background:var(--sunken); }
+  #onBack, #onNext { height:36px; border-radius:var(--r-lg); font:inherit; font-size:13px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:4px; }
+  #onBack { flex:none; padding:0 14px; border:1px solid var(--line2); background:var(--surface); color:var(--text); }
+  #onBack[hidden] { display:none; }
+  #onBack:hover { background:var(--hover); }
+  #onNext { flex:1; min-width:0; padding:0 16px; border:0; background:var(--accent-fill); color:var(--on-accent); }
+  #onNext:hover { filter:brightness(1.08); }
+  #onBack:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  #onNext:focus { outline:none; }
+  #onNext:focus-visible { outline:2px solid transparent; outline-offset:0; filter:brightness(1.15); box-shadow:var(--primary-focus); }
+  @keyframes oIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+  @keyframes oInBack { from { opacity:0; transform:translateY(-6px); } to { opacity:1; transform:none; } }
+  @media (prefers-reduced-motion:reduce) { #onboard .ostep, #onboard .orow, #onboard .willo, .odot, .ochoice, .ochoice::after, .oseg button { animation:none; transition:none; } }
+  /* Window resize: invisible hit zones on the 4 edges and 4 corners, chat mode only.
+     No grips or lines. The right zone is thin so the overlay scrollbar thumb stays usable. */
+  .rz { display:none; position:fixed; z-index:10; background:transparent; touch-action:none; }
+  body.chatmode .rz { display:block; }
+  .rz[data-edge=n] { top:0; left:12px; right:12px; height:6px; cursor:ns-resize; }
+  .rz[data-edge=s] { bottom:0; left:12px; right:12px; height:6px; cursor:ns-resize; }
+  /* 4px: the overlay scrollbar rail sits just left of it (right:4px). */
+  .rz[data-edge=e] { right:0; top:12px; bottom:12px; width:4px; cursor:ew-resize; }
+  .rz[data-edge=w] { left:0; top:12px; bottom:12px; width:6px; cursor:ew-resize; }
+  .rz[data-edge=ne], .rz[data-edge=nw], .rz[data-edge=se], .rz[data-edge=sw] { width:12px; height:12px; }
+  .rz[data-edge=ne] { top:0; right:0; cursor:nesw-resize; }
+  .rz[data-edge=sw] { bottom:0; left:0; cursor:nesw-resize; }
+  .rz[data-edge=nw] { top:0; left:0; cursor:nwse-resize; }
+  .rz[data-edge=se] { bottom:0; right:0; cursor:nwse-resize; }
+  /* Overlay scrollbar (see docs/CHAT.md, Scrollbars): the native bar is hidden, so the content
+     keeps its full width. JS puts a rail next to each area; only the thumb takes the pointer. */
+  .msgs, #settings, #welcome { scrollbar-width:none; }
+  .msgs::-webkit-scrollbar, #settings::-webkit-scrollbar, #welcome::-webkit-scrollbar { display:none; }
+  .sbar { position:absolute; z-index:5; right:4px; width:6px; pointer-events:none; opacity:0; transition:opacity .3s; }
+  .sbar.on { opacity:1; transition-duration:.12s; }
+  .sbar-thumb { position:absolute; top:0; right:0; width:3px; border-radius:999px; background:color-mix(in srgb, var(--faint) 50%, transparent); pointer-events:auto; transition:width .12s, background-color .12s; }
+  .sbar-thumb::before { content:""; position:absolute; inset:0 0 0 -5px; }
+  .sbar-thumb:hover { width:6px; background:color-mix(in srgb, var(--faint) 75%, transparent); }
+  .sbar.drag .sbar-thumb { width:6px; background:color-mix(in srgb, var(--faint) 75%, transparent); }
+  @media (prefers-reduced-motion:reduce) { .sbar, .sbar.on, .sbar-thumb { transition:none; } }
+  @media (prefers-reduced-motion:reduce) { .typing .dots i, .glow.on::before, .glow.on::after, .msg.stream::after { animation:none; } }
 </style>
 </head>
 <body>
-  <span id="badge"><span id="peers"></span><span id="icon"></span></span>
+  <div id="bar">
   <svg id="fileicon" viewBox="0 0 16 24" aria-hidden="true"><path fill="currentColor" d="M4 .3h3.7v7.4H4A3.7 3.7 0 0 1 4 .3zM8.3.3H12a3.7 3.7 0 0 1 0 7.4H8.3zM4 8.3h3.7v7.4H4a3.7 3.7 0 0 1 0-7.4zM12 8.3a3.7 3.7 0 1 1 0 7.4 3.7 3.7 0 0 1 0-7.4zM4 16.3h3.7V20A3.7 3.7 0 1 1 4 16.3z"/></svg>
   <span id="status">Connecting…</span>
+  <span id="badge"><span id="peers"></span><span id="icon" role="img"></span></span>
   <button id="update" type="button">Update</button>
+  <div id="barActions">
+    <button id="setbtn" type="button" title="Налаштування" aria-label="Налаштування"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M13.765 2.152C13.398 2 12.932 2 12 2s-1.398 0-1.765.152a2 2 0 0 0-1.083 1.083c-.092.223-.129.484-.143.863a1.62 1.62 0 0 1-.79 1.353a1.62 1.62 0 0 1-1.567.008c-.336-.178-.579-.276-.82-.308a2 2 0 0 0-1.478.396C4.04 5.79 3.806 6.193 3.34 7s-.7 1.21-.751 1.605a2 2 0 0 0 .396 1.479c.148.192.355.353.676.555c.473.297.777.803.777 1.361s-.304 1.064-.777 1.36c-.321.203-.529.364-.676.556a2 2 0 0 0-.396 1.479c.052.394.285.798.75 1.605c.467.807.7 1.21 1.015 1.453a2 2 0 0 0 1.479.396c.24-.032.483-.13.819-.308a1.62 1.62 0 0 1 1.567.008c.483.28.77.795.79 1.353c.014.38.05.64.143.863a2 2 0 0 0 1.083 1.083C10.602 22 11.068 22 12 22s1.398 0 1.765-.152a2 2 0 0 0 1.083-1.083c.092-.223.129-.483.143-.863c.02-.558.307-1.074.79-1.353a1.62 1.62 0 0 1 1.567-.008c.336.178.579.276.819.308a2 2 0 0 0 1.479-.396c.315-.242.548-.646 1.014-1.453s.7-1.21.751-1.605a2 2 0 0 0-.396-1.479c-.148-.192-.355-.353-.676-.555A1.62 1.62 0 0 1 19.562 12c0-.558.304-1.064.777-1.36c.321-.203.529-.364.676-.556a2 2 0 0 0 .396-1.479c-.052-.394-.285-.798-.75-1.605c-.467-.807-.7-1.21-1.015-1.453a2 2 0 0 0-1.479-.396c-.24.032-.483.13-.82.308a1.62 1.62 0 0 1-1.566-.008a1.62 1.62 0 0 1-.79-1.353c-.014-.38-.05-.64-.143-.863a2 2 0 0 0-1.083-1.083Z"/></g></svg></button>
+    <button id="chatbtn" type="button" title="Чат з Claude" aria-label="Чат з Claude"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2S2 6.477 2 12c0 1.6.376 3.112 1.043 4.453c.178.356.237.763.134 1.148l-.595 2.226a1.3 1.3 0 0 0 1.591 1.592l2.226-.596a1.63 1.63 0 0 1 1.149.133A9.96 9.96 0 0 0 12 22Z"/><path stroke-linecap="round" d="M8 10.5h8M8 14h5.5"/></g></svg><i></i></button>
+  </div>
+  </div>
+  <section id="chat" aria-label="Чат з Claude">
+    <div class="msgs" id="cMsgs" aria-live="polite"></div>
+    <div class="toast" id="cToast" role="status"></div>
+    <div class="glow" id="cGlow" aria-hidden="true"></div>
+    <form class="compose" id="cCompose">
+      <div class="cmds" id="cCmds" role="listbox" aria-label="Команди Claude" hidden></div>
+      <div class="typing" id="cTyping" hidden>
+        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span id="cStep" role="status"></span><small id="cTime"></small>
+        <button class="stop" id="cStop" type="button" title="Перервати завдання" aria-label="Перервати завдання"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C22 4.92893 22 7.28595 22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22Z"/></svg></button>
+      </div>
+      <div class="qbar" id="cQbar" hidden><div><b></b><span></span></div><button type="button" id="cQbarX" aria-label="Прибрати цитату" title="Прибрати цитату"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M15 9l-6 6m0-6l6 6"/></svg></button></div>
+      <div class="att" id="cAtt" hidden></div>
+      <div class="field">
+        <button class="clip" id="cClip" type="button" title="Прикріпити фото" aria-label="Прикріпити фото"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M7.9175 17.8068L15.8084 10.2535C16.7558 9.34668 16.7558 7.87637 15.8084 6.96951C14.861 6.06265 13.325 6.06265 12.3776 6.96951L4.54387 14.4681C2.74382 16.1911 2.74382 18.9847 4.54387 20.7077C6.34391 22.4308 9.26237 22.4308 11.0624 20.7077L19.0105 13.0997C21.6632 10.5605 21.6632 6.44362 19.0105 3.90441C16.3578 1.3652 12.0569 1.3652 9.40419 3.90441L3 10.0346"/></svg></button>
+        <input type="file" id="cFile" accept="image/*" multiple hidden>
+        <textarea id="cInput" rows="1" placeholder="Напиши, що зробити в цьому файлі" aria-label="Повідомлення" aria-controls="cCmds" aria-expanded="false" aria-autocomplete="list"></textarea>
+        <button class="send" id="cSend" type="submit" aria-label="Надіслати" title="Надіслати"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none"><path stroke="currentColor" stroke-width="2" d="m18.636 15.67l1.716-5.15c1.5-4.498 2.25-6.747 1.062-7.934s-3.436-.438-7.935 1.062L8.33 5.364C4.7 6.574 2.885 7.18 2.37 8.067a2.72 2.72 0 0 0 0 2.73c.515.888 2.33 1.493 5.96 2.704c.584.194.875.291 1.119.454c.236.158.439.361.597.597c.163.244.26.535.454 1.118c1.21 3.63 1.816 5.446 2.703 5.962a2.72 2.72 0 0 0 2.731 0c.887-.516 1.492-2.331 2.703-5.962Z"/><path fill="currentColor" d="M16.212 8.848a.75.75 0 0 0-1.055-1.066zm-5.55 5.488l5.55-5.488l-1.055-1.066l-5.55 5.488z"/></g></svg></button>
+      </div>
+    </form>
+    <div id="cNoAgent" role="region" aria-labelledby="cNoAgentH"></div>
+  </section>
+  <section id="welcome" role="dialog" aria-labelledby="welcomeH" hidden></section>
+  <section id="onboard" role="dialog" aria-label="Знайомство з Figmosha" hidden></section>
+  <section id="settings" aria-label="Налаштування">
+    <div class="shead">
+      <button id="sBack" type="button" title="Назад до чату" aria-label="Назад до чату"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 5l-6 7l6 7"/></svg></button>
+      <h2>Налаштування</h2>
+    </div>
+    <div class="srow">
+      <h3 id="sScaleH">Масштаб інтерфейсу</h3>
+      <span class="dd"><select id="sScale" aria-labelledby="sScaleH">
+        <option value="0.9">90%</option>
+        <option value="1">100%</option>
+        <option value="1.1">110%</option>
+        <option value="1.25">125%</option>
+      </select></span>
+    </div>
+    <div class="srow">
+      <h3 id="sThemeH">Тема</h3>
+      <span class="dd"><select id="sTheme" aria-labelledby="sThemeH">
+        <option value="system">Як у Figma</option>
+        <option value="light">Світла</option>
+        <option value="dark">Темна</option>
+      </select></span>
+    </div>
+    <div class="srow">
+      <h3 id="sLangH">Мова</h3>
+      <span class="dd"><select id="sLang" aria-labelledby="sLangH">
+        <option value="uk" lang="uk">Українська</option>
+        <option value="en" lang="en">English</option>
+      </select></span>
+    </div>
+    <div class="srow">
+      <h3 id="sAgentH">Агент</h3>
+      <span class="dd"><select id="sAgent" aria-labelledby="sAgentH"></select></span>
+    </div>
+    <div class="srow">
+      <h3 id="sModelH">Модель</h3>
+      <span class="dd"><select id="sModel" aria-labelledby="sModelH"></select></span>
+    </div>
+    <div class="srow">
+      <h3 id="sEffortH">Зусилля</h3>
+      <span class="dd"><select id="sEffort" aria-labelledby="sEffortH"></select></span>
+    </div>
+  </section>
+
+<div class="rz" data-edge="n"></div><div class="rz" data-edge="s"></div><div class="rz" data-edge="e"></div><div class="rz" data-edge="w"></div>
+<div class="rz" data-edge="ne"></div><div class="rz" data-edge="nw"></div><div class="rz" data-edge="se"></div><div class="rz" data-edge="sw"></div>
+<script id="chat-core">
+// Pure chat logic: no DOM, no network. tests/chat_ui.test.js runs it in node.
+var ChatCore = (function () {
+  var esc = function (s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  };
+  // plain text: escape, links, **bold**, new lines
+  function inline(s) {
+    return esc(s)
+      .replace(/https?:\/\/[^\s<]+[^\s<.,;:!?)\]]/g, function (u) { return '<a href="' + u + '" target="_blank" rel="noopener">' + u + "</a>"; })
+      .replace(/\*\*([^*\n]+?)\*\*/g, "<b>$1</b>")
+      .replace(/\n/g, "<br>");
+  }
+  // text outside code blocks: `code` spans keep their text as it is
+  function spans(s) {
+    return s.split(/`([^`\n]+)`/).map(function (p, i) { return i % 2 ? "<code>" + esc(p) + "</code>" : inline(p); }).join("");
+  }
+  // Blocks in text outside code blocks: # headings and GFM pipe tables. Other lines stay text.
+  // A block takes the line breaks and blank lines next to it: it has its own margins.
+  var HEAD = /^\s{0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
+  var SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+  function cells(line) {
+    var t = line.trim().replace(/^\|/, "").replace(/(^|[^\\])\|$/, "$1");
+    return t.split(/(?<!\\)\|/).map(function (c) { return c.replace(/\\\|/g, "|").trim(); });
+  }
+  function table(head, sep, rows) {
+    var al = sep.map(function (c) { return /^:-+:$/.test(c) ? "center" : /-:$/.test(c) ? "right" : /^:/.test(c) ? "left" : ""; });
+    var row = function (cs, tag) {
+      return "<tr>" + al.map(function (a, i) {
+        return "<" + tag + (a ? ' style="text-align:' + a + '"' : "") + ">" + spans(cs[i] || "") + "</" + tag + ">";
+      }).join("") + "</tr>";
+    };
+    return '<div class="mtable"><table><thead>' + row(head, "th") + "</thead>"
+      + (rows.length ? "<tbody>" + rows.map(function (r) { return row(r, "td"); }).join("") + "</tbody>" : "") + "</table></div>";
+  }
+  function blocks(s) {
+    var lines = s.split("\n"), out = "", buf = [], i = 0, m, sep;
+    var flush = function () {
+      while (buf.length && !buf[buf.length - 1].trim()) buf.pop();
+      if (buf.length) out += spans(buf.join("\n"));
+      buf = [];
+    };
+    var block = function (html) {
+      flush(); out += html;
+      while (i < lines.length && !lines[i].trim()) i++;
+    };
+    while (i < lines.length) {
+      var l = lines[i];
+      if ((m = HEAD.exec(l))) {
+        i++; block('<div class="mh" role="heading" aria-level="' + m[1].length + '">' + spans(m[2]) + "</div>");
+      } else if (l.indexOf("|") >= 0 && i + 1 < lines.length && lines[i + 1].indexOf("-") >= 0 && SEP.test(lines[i + 1])
+                 && (sep = cells(lines[i + 1])).length === cells(l).length) {
+        var head = cells(l), rows = [];
+        i += 2;
+        while (i < lines.length && lines[i].indexOf("|") >= 0 && lines[i].trim()) rows.push(cells(lines[i++]));
+        block(table(head, sep, rows));
+      } else { buf.push(l); i++; }
+    }
+    // the text at the end keeps its last line break: it may touch a code block
+    if (buf.length) out += spans(buf.join("\n"));
+    return out;
+  }
+  function renderText(s) {
+    return String(s == null ? "" : s).split(/```[^\n`]*\n([\s\S]*?)```/)
+      .map(function (p, i) { return i % 2 ? "<pre>" + esc(p.replace(/\n$/, "")) + "</pre>" : blocks(p); }).join("");
+  }
+  function actionLetter(i) { return "ABCDEFGH".charAt(i); }
+  // Slash commands. Known ones get a Ukrainian hint and come first, in this order.
+  var HINTS = {
+    clear: "Почати нову розмову", compact: "Стиснути розмову до підсумку", context: "Показати, скільки контексту зайнято",
+    usage: "Показати ліміти і витрати", model: "Змінити модель", effort: "Змінити рівень зусиль", fast: "Увімкнути швидкий режим",
+    init: "Створити CLAUDE.md для проєкту", rename: "Перейменувати розмову", recap: "Короткий підсумок сесії",
+    "code-review": "Перевірити зміни в коді", "security-review": "Перевірити безпеку змін", simplify: "Спростити змінений код",
+    mcp: "Керувати MCP серверами", config: "Змінити налаштування", "output-style": "Вибрати стиль відповідей",
+    advisor: "Радитися з сильнішою моделлю", debug: "Знайти причину збою", doctor: "Перевірити налаштування Claude Code",
+    loop: "Повторювати завдання", schedule: "Запланувати завдання", goal: "Працювати, поки мету не досягнуто",
+    insights: "Звіт про твої сесії", autocompact: "Коли стискати розмову самому", "reload-skills": "Перечитати навички",
+    "skill-doctor": "Знайти зайві навички"
+  };
+  var HINTS_EN = {
+    clear: "Start a new conversation", compact: "Compact the conversation to a summary", context: "Show how much context is used",
+    usage: "Show limits and costs", model: "Change the model", effort: "Change the effort level", fast: "Turn on fast mode",
+    init: "Create CLAUDE.md for the project", rename: "Rename the conversation", recap: "Short summary of the session",
+    "code-review": "Review the code changes", "security-review": "Check the changes for security", simplify: "Simplify the changed code",
+    mcp: "Manage MCP servers", config: "Change the settings", "output-style": "Pick the reply style",
+    advisor: "Ask a stronger model for advice", debug: "Find the cause of a failure", doctor: "Check the Claude Code setup",
+    loop: "Repeat a task", schedule: "Schedule a task", goal: "Work until the goal is reached",
+    insights: "Report about your sessions", autocompact: "When to compact by itself", "reload-skills": "Read the skills again",
+    "skill-doctor": "Find extra skills"
+  };
+  var ORDER = Object.keys(HINTS);
+  var FALLBACK_COMMANDS = ["clear", "compact", "context", "usage", "init", "rename", "recap", "code-review", "simplify"]
+    .map(function (n) { return n === "clear" ? { name: n, aliases: ["reset", "new"] } : { name: n }; });
+  function commandHint(c, lang) {
+    var hints = lang === "en" ? HINTS_EN : HINTS;
+    if (hints[c.name]) return hints[c.name];
+    var d = String(c.description || "").trim(), m = /^.*?[.!?](?=\s|$)/.exec(d);
+    return m ? m[0] : d;
+  }
+  // The list for the popup: only while the text is a slash and a name, with no space yet.
+  function matchCommands(list, text) {
+    var m = /^\/([^\s\/]*)$/.exec(String(text || ""));
+    if (!m) return [];
+    var q = m[1].toLowerCase();
+    var keys = function (c) { return [c.name].concat(c.aliases || []).map(function (k) { return String(k).toLowerCase(); }); };
+    var rank = function (a, b) {
+      var i = ORDER.indexOf(a.name), j = ORDER.indexOf(b.name);
+      i = i < 0 ? 1e6 : i; j = j < 0 ? 1e6 : j;
+      return i - j || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+    };
+    var all = (list || []).filter(function (c) { return c && c.name && c.name.charAt(0) !== "_"; });
+    var pre = all.filter(function (c) { return keys(c).some(function (k) { return k.indexOf(q) === 0; }); }).sort(rank);
+    var sub = q.length < 2 ? [] : all.filter(function (c) {
+      return pre.indexOf(c) < 0 && keys(c).some(function (k) { return k.indexOf(q) > 0; });
+    }).sort(rank);
+    return pre.concat(sub);
+  }
+  function initialState() { return { messages: [], busy: false, activity: [], stream: "", commands: [] }; }
+  function copy(s, patch) { var o = {}, k; for (k in s) o[k] = s[k]; for (k in patch) o[k] = patch[k]; return o; }
+  function reduce(s, e) {
+    switch (e && e.kind) {
+      case "history":
+        return copy(s, { messages: (e.messages || []).slice(), busy: !!e.busy, activity: (e.activity || []).slice(-30), stream: "",
+                         commands: e.commands ? e.commands.slice() : s.commands });
+      case "commands":
+        return copy(s, { commands: (e.commands || []).slice() });
+      case "message": {
+        var m = e.message; if (!m) return s;
+        var at = -1;
+        for (var i = 0; i < s.messages.length; i++) if (s.messages[i].id === m.id) at = i;
+        var list = s.messages.slice();
+        if (at >= 0) list[at] = m; else list.push(m);
+        return copy(s, { messages: list, stream: m.from === "claude" ? "" : s.stream });
+      }
+      case "delta":
+        return copy(s, { stream: s.stream + (e.text || "") });
+      case "activity":
+        return copy(s, { activity: s.activity.concat([{ text: String(e.text || ""), t: e.t != null ? e.t : Math.floor(Date.now() / 1000) }]).slice(-30) });
+      case "busy":
+        return e.busy ? copy(s, { busy: true }) : copy(s, { busy: false, activity: [], stream: "" });
+      default:
+        return s;
+    }
+  }
+  return { esc: esc, renderText: renderText, actionLetter: actionLetter, initialState: initialState, reduce: reduce,
+           matchCommands: matchCommands, commandHint: commandHint, FALLBACK_COMMANDS: FALLBACK_COMMANDS,
+           HINTS: HINTS, HINTS_EN: HINTS_EN };
+})();
+</script>
 
 <script>
 // Icons: Solar icon set by 480 Design — CC BY 4.0
@@ -75,6 +664,96 @@ const ICONS = {
   err: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22C17.5228 22 22 17.5228 22 12ZM12 6.25C12.4142 6.25 12.75 6.58579 12.75 7V13C12.75 13.4142 12.4142 13.75 12 13.75C11.5858 13.75 11.25 13.4142 11.25 13V7C11.25 6.58579 11.5858 6.25 12 6.25ZM12 17C12.5523 17 13 16.5523 13 16C13 15.4477 12.5523 15 12 15C11.4477 15 11 15.4477 11 16C11 16.5523 11.4477 17 12 17Z" clip-rule="evenodd"/></svg>`,
   pending: `<svg xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"><path fill="currentColor" fill-rule="evenodd" d="M12 22C17.5228 22 22 17.5228 22 12C22 6.47715 17.5228 2 12 2C6.47715 2 2 6.47715 2 12C2 17.5228 6.47715 22 12 22ZM15.9346 5.59158C16.217 5.70662 16.4017 5.98121 16.4017 6.28616V9.00067C16.4017 9.41489 16.0659 9.75067 15.6517 9.75067H13C12.6983 9.75067 12.4259 9.56984 12.3088 9.29174C12.1917 9.01364 12.2527 8.69245 12.4635 8.47659L13.225 7.69705C11.7795 7.25143 10.1467 7.61303 9.00097 8.78596C7.33301 10.4935 7.33301 13.269 9.00097 14.9765C10.6593 16.6742 13.3407 16.6742 14.999 14.9765C15.6769 14.2826 16.0805 13.4112 16.2069 12.5045C16.2651 12.0865 16.5972 11.7349 17.0192 11.7349C17.4246 11.7349 17.7609 12.0595 17.7217 12.463C17.5957 13.7606 17.0471 15.0265 16.072 16.0247C13.8252 18.3248 10.1748 18.3248 7.92796 16.0247C5.69068 13.7344 5.69068 10.0281 7.92796 7.7378C9.66551 5.95905 12.244 5.55465 14.3647 6.53037L15.1152 5.76208C15.3283 5.54393 15.6522 5.47653 15.9346 5.59158Z" clip-rule="evenodd"/></svg>`,
 };
+
+// Interface language (settings page): every text the designer sees comes from here.
+// The bar status line is English in both, as before.
+const I18N = {
+  uk: {
+    connecting: "Connecting…", connected: "connected", error: "Error", reconnecting: "Reconnecting…",
+    rerunBar: "New version: re-run plugin", updateBar: "New version {v}", updateBtn: "Update",
+    updateTitle: "Figmosha {v} is out (this is {c}) — open the release notes",
+    stBusy: "Виконую скрипт", stErr: "Помилка в скрипті", stRerun: "Є нова версія. Перезапусти плагін",
+    stUpdate: "Є нова версія {v}", stOk: "Підключено", stLinkErr: "Помилка зв'язку з мостом",
+    stConn: "Підключаюсь до мосту", stSlot: ". Файл {i} з {n}",
+    settings: "Налаштування", chatWith: "Чат з Claude", commands: "Команди Claude", stop: "Перервати завдання",
+    unquote: "Прибрати цитату", attach: "Прикріпити фото", placeholder: "Напиши, що зробити в цьому файлі",
+    message: "Повідомлення", send: "Надіслати", back: "Назад до чату", scale: "Масштаб інтерфейсу",
+    theme: "Тема", themeSystem: "Як у Figma", themeLight: "Світла", themeDark: "Темна", lang: "Мова",
+    you: "Ти", system: "Система", photo: "Фото",
+    noBridge: "Немає зв'язку з мостом", notSent: "Не вийшло надіслати", noPhoto: "Не вийшло відкрити фото",
+    notStopped: "Не вийшло зупинити", gone: "Цього повідомлення вже немає",
+    answers: "Відповіді {d} з {n}", yourAnswer: "Твоя відповідь", answerTo: "Відповідь на питання {i}",
+    sendAnswer: "Надіслати відповідь",
+    rerunTitle: "Плагін оновився.", rerunSub: "Перезапусти його. Тоді запрацює нова версія.", rerunGo: "Перезапустити",
+    updTitle: "Є нова версія {v}.", updYours: "У тебе версія {c}. ", updSub: "Оновити відкриє опис нової версії.",
+    updGo: "Оновити", skip: "Пропустити", quote: "Цитувати",
+    empty: "Напиши, що зробити в цьому файлі. Claude Code працює саме з ним і бачить усе, що бачиш ти.",
+    stopping: "Зупиняюсь", writing: "Пишу відповідь", thinking: "Думаю", sec: "{n} с", min: "{n} хв",
+    unphoto: "Прибрати фото", locale: "uk-UA",
+    agent: "Агент", model: "Модель", effort: "Зусилля", notFound: "Не знайдено на комп'ютері з мостом",
+    eff_low: "Низьке", eff_medium: "Середнє", eff_high: "Високе", eff_xhigh: "Дуже високе", eff_max: "Максимум", eff_ultra: "Ультра",
+    naTitle: "Потрібен агент",
+    naText: "Чат працює з Claude Code або Codex. Встанови один із них на комп'ютері з мостом.",
+    naLogin: "Потім увійди в нього в терміналі.", naCheck: "Перевірити ще раз", naNone: "Агента ще не знайдено.",
+  },
+  en: {
+    connecting: "Connecting…", connected: "connected", error: "Error", reconnecting: "Reconnecting…",
+    rerunBar: "New version: re-run plugin", updateBar: "New version {v}", updateBtn: "Update",
+    updateTitle: "Figmosha {v} is out. You have {c}. Open the release notes",
+    stBusy: "Running a script", stErr: "Script error", stRerun: "New version. Restart the plugin",
+    stUpdate: "New version {v}", stOk: "Connected", stLinkErr: "No link to the bridge",
+    stConn: "Connecting to the bridge", stSlot: ". File {i} of {n}",
+    settings: "Settings", chatWith: "Chat with Claude", commands: "Claude commands", stop: "Stop the task",
+    unquote: "Remove the quote", attach: "Attach a photo", placeholder: "Tell Claude what to do in this file",
+    message: "Message", send: "Send", back: "Back to the chat", scale: "Interface scale",
+    theme: "Theme", themeSystem: "Like Figma", themeLight: "Light", themeDark: "Dark", lang: "Language",
+    you: "You", system: "System", photo: "Photo",
+    noBridge: "No link to the bridge", notSent: "Could not send", noPhoto: "Could not open the photo",
+    notStopped: "Could not stop", gone: "This message is gone",
+    answers: "Answers {d} of {n}", yourAnswer: "Your answer", answerTo: "Answer to question {i}",
+    sendAnswer: "Send the answer",
+    rerunTitle: "The plugin is updated.", rerunSub: "Restart it. Then the new version works.", rerunGo: "Restart",
+    updTitle: "New version {v}.", updYours: "You have version {c}. ", updSub: "Update opens the notes of the new version.",
+    updGo: "Update", skip: "Skip", quote: "Quote",
+    empty: "Tell Claude what to do in this file. Claude Code works with this file and sees all that you see.",
+    stopping: "Stopping", writing: "Writing the reply", thinking: "Thinking", sec: "{n} s", min: "{n} min",
+    unphoto: "Remove the photo", locale: "en-GB",
+    agent: "Agent", model: "Model", effort: "Effort", notFound: "Not found on the bridge computer",
+    eff_low: "Low", eff_medium: "Medium", eff_high: "High", eff_xhigh: "Extra high", eff_max: "Max", eff_ultra: "Ultra",
+    naTitle: "An agent is needed",
+    naText: "The chat works with Claude Code or Codex. Install one of them on the bridge computer.",
+    naLogin: "Then log in to it in a terminal.", naCheck: "Check again", naNone: "No agent found yet.",
+  },
+};
+let uiLang = "uk";
+let agentName = "Claude";   // the texts name the agent that answers now
+function t(key, vars) {
+  let s = (I18N[uiLang] || I18N.uk)[key];
+  if (agentName !== "Claude" && typeof s === "string") s = s.replace(/Claude Code|Claude/g, agentName);
+  return vars ? s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] == null ? "" : String(vars[k]))) : s;
+}
+// Texts in the static markup: [selector, attributes ("text" is the content), key].
+const I18N_DOM = [
+  ["#setbtn", "title aria-label", "settings"], ["#chatbtn", "title aria-label", "chatWith"],
+  ["#update", "text", "updateBtn"], ["#chat", "aria-label", "chatWith"], ["#cCmds", "aria-label", "commands"],
+  ["#cStop", "title aria-label", "stop"], ["#cQbarX", "title aria-label", "unquote"],
+  ["#cClip", "title aria-label", "attach"], ["#cInput", "placeholder", "placeholder"], ["#cInput", "aria-label", "message"],
+  ["#cSend", "title aria-label", "send"], ["#settings", "aria-label", "settings"], ["#sBack", "title aria-label", "back"],
+  ["#settings h2", "text", "settings"], ["#sScaleH", "text", "scale"], ["#sThemeH", "text", "theme"],
+  ['#sTheme option[value="system"]', "text", "themeSystem"], ['#sTheme option[value="light"]', "text", "themeLight"],
+  ['#sTheme option[value="dark"]', "text", "themeDark"], ["#sLangH", "text", "lang"],
+  ["#sAgentH", "text", "agent"], ["#sModelH", "text", "model"], ["#sEffortH", "text", "effort"],
+];
+// Parts built from code re-render here on a language switch.
+const LANG_HOOKS = [];
+function applyLang() {
+  document.documentElement.lang = uiLang;
+  LANG_HOOKS.forEach((f) => f());
+  I18N_DOM.forEach(([sel, attrs, key]) => {
+    const el = document.querySelector(sel); if (!el) return;
+    attrs.split(" ").forEach((a) => { if (a === "text") el.textContent = t(key); else el.setAttribute(a, t(key)); });
+  });
+}
 
 const SERVER = "ws://localhost:8787/plugin";
 const statusEl = document.getElementById("status");
@@ -94,6 +773,7 @@ function sendHello() {
       fileKey: identity.fileKey, name: identity.name, docSig: identity.docSig,
     }));
   } catch (e) {}
+  chatLoad();  // the bridge now knows this file: ask for its chat
 }
 
 // Kept for debugging via the plugin console — no longer rendered in the UI.
@@ -111,9 +791,13 @@ let busyHold = null;
 
 // Set when the bridge says plugin/code.js on disk is newer than this run.
 let outdated = false;
-// Set when the bridge found newer commits on GitHub: {behind, url}.
+// The plugin build on disk the bridge asks this window to re-run into.
+let outdatedTo = "";
+// Set when the bridge found a newer release on GitHub: {latest, current, url}.
 let update = null;
-let statusText = "Connecting…";
+// Versions the user skipped in the chat card, from clientStorage via code.js.
+let skips = { update: null, rerun: null };
+let statusText = I18N.uk.connecting;
 
 function render() {
   const multi = state === "ok" && peers && peers.total > 1;
@@ -122,15 +806,30 @@ function render() {
   const stale = state === "ok" && !busy && !failed && outdated;
   peersEl.textContent = multi ? `${peers.index}/${peers.total}` : "";
   // Re-run beats Update: a stale plugin has to be re-run before anything else.
-  const offer = state === "ok" && !busy && !failed && !stale && update !== null;
-  statusEl.textContent = stale ? "New version: re-run plugin"
-    : offer ? `New version ${update.latest || ""}`.trim() : statusText;
+  // A version skipped in the chat card is not offered here either.
+  const offer = state === "ok" && !busy && !failed && !stale && update !== null && update.latest !== skips.update;
+  statusEl.textContent = stale ? t("rerunBar")
+    : offer ? t("updateBar", { v: update.latest || "" }).trim() : statusText;
   iconEl.innerHTML = ICONS[busy || stale ? "pending" : failed ? "err" : state] || "";
+  // The state lives in the icon: its color class plus the same thing in words.
+  const [cls, words] = busy ? ["busy", t("stBusy")]
+    : failed ? ["err", t("stErr")]
+    : stale ? ["update", t("stRerun")]
+    : offer ? ["update", t("stUpdate", { v: update.latest }).trim()]
+    : state === "ok" ? ["ok", t("stOk")]
+    : state === "err" ? ["err", t("stLinkErr")]
+    : ["conn", t("stConn")];
+  const label = words + (multi ? t("stSlot", { i: peers.index, n: peers.total }) : "");
+  if (update) updateEl.title = t("updateTitle", { v: update.latest, c: update.current });
+  iconEl.className = "st-" + cls;
+  iconEl.title = label;
+  iconEl.setAttribute("aria-label", label);
   document.body.className = (failed ? "err" : stale ? "ok outdated" : offer ? "ok update" : state)
-    + (multi ? " multi" : "") + (busy ? " busy" : "");
+    + (multi ? " multi" : "") + (busy ? " busy" : "")
+    + (uiMode === "chat" ? " chatmode" : "") + (unread ? " unread" : "") + (chat.busy ? " cbusy" : "");
 }
 
-// A failed exec turns the bar red for 2s, then it goes back to normal.
+// A failed exec turns the status icon red for 2s, then it goes back to normal.
 let errorHold = null;
 function flashError() {
   clearTimeout(errorHold);
@@ -169,9 +868,10 @@ function shortId(id) {
 
 function connect() {
   clearTimeout(reconnectTimer);
-  setStatus("Connecting…", "pending");
+  setStatus(t("connecting"), "pending");
+  let sock;
   try {
-    ws = new WebSocket(SERVER);
+    sock = ws = new WebSocket(SERVER);
   } catch (e) {
     log("[ws] new WebSocket failed: " + e.message);
     reconnectTimer = setTimeout(connect, 2000);
@@ -183,7 +883,8 @@ function connect() {
     // hello time if this build is still behind.
     outdated = false;
     update = null;
-    setStatus(identity.name || "connected", "ok");
+    renderChat();
+    setStatus(identity.name || t("connected"), "ok");
     log("[ws] connected" + (identity.name ? ` as ${identity.name}` : ""));
     sendHello();
     // In case identity hasn't arrived from the plugin yet, ask for it.
@@ -196,6 +897,7 @@ function connect() {
       log("[ws] bad message: " + err.message);
       return;
     }
+    if (!msg || typeof msg !== "object") return;
     if (msg.type === "exec") {
       log(`[exec] ${shortId(msg.id)} code=${(msg.code || "").length}b`);
       execStarted(msg.id);
@@ -211,35 +913,45 @@ function connect() {
       parent.postMessage({ pluginMessage: { type: "abort", id: msg.id } }, "*");
     } else if (msg.type === "update") {
       // A newer release (vX.Y.Z tag) than the bridge's VERSION; url = its release page.
-      update = { latest: msg.latest, url: msg.url };
-      updateEl.title = `Figmosha ${msg.latest} is out (this is ${msg.current}) — open the release notes`;
+      // latest null: the bridge withdrew the offer.
+      update = msg.latest ? { latest: msg.latest, current: msg.current, url: msg.url } : null;
       render();
+      renderChat();
     } else if (msg.type === "outdated") {
       outdated = true;
+      outdatedTo = String(msg.expected || "");
       log(`[outdated] running ${msg.running}, bridge has ${msg.expected}`);
       render();
+      renderChat();
+    } else if (msg.type === "chat") {
+      if (msg.doc === identity.docSig) chatEvent(msg.event);
     } else if (msg.type === "peers") {
       setPeers({ index: msg.index, total: msg.total });
     }
   };
 
+  // A replaced socket may still be closing: its late events must not touch the new one.
   ws.onerror = () => {
-    setStatus("Error", "err");
+    if (sock !== ws) return;
+    setStatus(t("error"), "err");
     log("[ws] error");
   };
 
   ws.onclose = () => {
+    if (sock !== ws) return;
     // The bridge holds one slot per open file, so a close is always transient:
     // bridge restart, or this tab's socket dropped. Just reconnect.
-    setStatus("Reconnecting…", "pending");
+    setStatus(t("reconnecting"), "pending");
     log("[ws] disconnected");
+    agentOffline();
     reconnectTimer = setTimeout(connect, 2000);
   };
 }
 
-updateEl.onclick = () => {
+function openUpdate() {
   if (update) parent.postMessage({ pluginMessage: { type: "open-url", url: update.url } }, "*");
-};
+}
+updateEl.onclick = openUpdate;
 
 window.onmessage = (e) => {
   const m = e.data && e.data.pluginMessage;
@@ -253,6 +965,11 @@ window.onmessage = (e) => {
     sendHello();  // (re-)register this connection under the file name
     return;
   }
+  if (m.type === "ui-mode") { setMode(m.mode); return; }  // code.js resized the window
+  if (m.type === "settings") { applySettings(m); return; }  // stored scale and theme, on start
+  if (m.type === "onboarding") { showOnboard(m.show === true); return; }  // first run of this user
+  if (m.type === "welcome") { showWelcome(m.show === true); return; }  // first run in this file
+  if (m.type === "notice-skips") { skips = { update: m.update || null, rerun: m.rerun || null }; render(); renderChat(); return; }
   if (m.type === "result" || m.type === "error") {
     if (m.type === "error") flashError();
     execFinished(m.id);
@@ -284,6 +1001,939 @@ document.addEventListener("visibilitychange", () => {
     connect();
   }
 });
+
+// ─── Chat view: one Claude Code session for this file (docs/CHAT.md) ───────
+// Everything goes over the plugin socket (chat-load / chat-send / chat-stop);
+// fetch from this iframe would hit CORS. Images load from the bridge by URL.
+const BRIDGE = "http://localhost:8787";
+const C = ChatCore;
+const $c = (id) => document.getElementById(id);
+const rootEl = document.documentElement;
+const cMsgs = $c("cMsgs"), cInput = $c("cInput"), cCompose = $c("cCompose");
+let chat = C.initialState();
+let uiMode = "bar";
+let welcomeOn = false;  // the welcome screen is open (see showWelcome)
+let onboardOn = false;  // the first-run onboarding is open (see showOnboard)
+let unread = false;
+let busySince = 0, stopping = false;
+let quoteId = null, attached = [], qDraft = {}, lastSent = null, focusNext = null;
+const CHECK = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m5 12.5l4.5 4.5L19 7"/></svg>';
+const QUOTE_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.5 17L4.5 12L9.5 7M4.5 12L14.5 12C16.1667 12 19.5 13 19.5 17"/></svg>';
+const SEND_SVG = $c("cSend").innerHTML;
+const XS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M15 9l-6 6m0-6l6 6"/></svg>';
+const whoName = (m) => !m ? "Claude" : m.from === "me" ? t("you") : m.from === "system" ? t("system") : m.agent === "codex" ? "Codex" : "Claude";
+const hhmm = (s) => new Date(s * 1000).toLocaleTimeString(t("locale"), { hour: "2-digit", minute: "2-digit" });
+const quoteText = (m) => (m.text || "").trim().replace(/\s+/g, " ") || ((m.images || []).length ? t("photo") : "");
+
+function chatSend(body) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { toast(t("noBridge")); return false; }
+  try { ws.send(JSON.stringify(Object.assign({ type: "chat-send" }, body))); } catch (e) { toast(t("notSent")); return false; }
+  return true;
+}
+function chatLoad() {
+  if (!ws || ws.readyState !== WebSocket.OPEN || !identity.docSig) return;
+  try { ws.send(JSON.stringify({ type: "chat-load", lang: uiLang })); } catch (e) {}  // lang: the chat language
+}
+
+let toastTimer = null;
+function toast(text) {
+  const el = $c("cToast"); el.textContent = text; el.classList.add("on");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove("on"), 2600);
+}
+
+function chatEvent(ev) {
+  if (!ev) return;
+  if (ev.kind === "refused") {
+    toast(t("notSent"));
+    if (lastSent && !cInput.value) { cInput.value = lastSent.text || ""; grow(cInput); }
+    return;
+  }
+  if (ev.kind === "settings" || ev.kind === "providers") {
+    agentEvent(ev); syncAgentName();
+    if (ev.commands && agentProvider() !== "codex") chat = C.reduce(chat, { kind: "commands", commands: ev.commands });
+    renderCmds();
+    return;
+  }
+  const was = chat;
+  chat = C.reduce(chat, ev);
+  if (ev.kind === "history") {
+    if (ev.providers !== undefined || ev.settings) { agentEvent(ev); syncAgentName(); }
+    if (agentProvider() === "codex") chat = Object.assign({}, chat, { commands: was.commands });  // keep the Claude list
+  }
+  if (chat.busy && !was.busy) { busySince = ev.kind === "history" && chat.activity.length ? chat.activity[0].t * 1000 : Date.now(); }
+  if (!chat.busy || ev.kind === "history") stopping = false;  // fresh history: a stop may not have arrived
+  if (ev.kind === "message" && ev.message.from !== "me" && uiMode !== "chat") unread = true;
+  render();
+  renderChat();
+  renderCmds();
+}
+
+// ── agent: provider, model and effort (the bridge holds them, see docs/CHAT.md) ──
+// providers: undefined = an older bridge (the chat as before), [] = no agent found.
+// live: the providers came from the bridge on this socket. An offline bridge is not the no agent state.
+let agent = { providers: undefined, settings: null, live: false };
+let recheckWait = false;   // Check again was sent: say so if the answer is still no agent
+const CODEX_COMMANDS = [{ name: "clear", aliases: ["reset", "new"] }];
+const agentProvider = () => agent.settings && agent.settings.provider;
+function syncAgentName() {
+  const n = agentProvider() === "codex" ? "Codex" : "Claude";
+  if (n !== agentName) { agentName = n; applyLang(); }
+}
+function agentEvent(ev) {
+  if (Array.isArray(ev.providers)) {
+    const models = ev.models || {};
+    agent.providers = ev.providers.filter((x) => x && x.id)
+      .map((x) => Object.assign({}, x, { models: Array.isArray(x.models) ? x.models : (models[x.id] || []) }));
+  }
+  if (ev.settings && typeof ev.settings === "object") agent.settings = Object.assign({}, ev.settings);
+  agent.live = true;
+  renderAgent();
+  if (recheckWait && Array.isArray(ev.providers)) { recheckWait = false; if (!agent.providers.length) toast(t("naNone")); }
+}
+function agentOffline() { agent.live = false; recheckWait = false; renderAgent(); }
+function agentSend(patch) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { toast(t("noBridge")); return; }
+  try { ws.send(JSON.stringify(Object.assign({ type: "chat-settings" }, patch))); } catch (e) { toast(t("notSent")); }
+}
+const effName = (e) => (I18N[uiLang] || I18N.uk)["eff_" + e] || e;
+// Fill a settings dropdown. The options are rebuilt only when they change, so a
+// bridge event does not close an open list; the select element stays, so it keeps the focus.
+function fillSelect(sel, items, on) {
+  const html = items.map((it) => `<option value="${C.esc(it.id)}"`
+    + (it.off ? ` disabled title="${C.esc(t("notFound"))}"` : "") + `>${C.esc(it.name)}${it.off ? " (" + C.esc(t("notFound")) + ")" : ""}</option>`).join("");
+  const i = items.findIndex((it) => it.id === on && !it.off);
+  // Nothing valid to select (no agent found): a placeholder says so instead of an empty field.
+  const full = i < 0 && items.length ? `<option value="" disabled>${C.esc(t("naTitle"))}</option>` + html : html;
+  if (sel._html !== full) { sel.innerHTML = full; sel._html = full; }
+  sel.selectedIndex = i < 0 ? (items.length ? 0 : -1) : i + (full === html ? 0 : 1);
+  sel.closest(".srow").hidden = !items.length;
+}
+function renderAgent() {
+  const list = agent.providers || [], cfg = agent.settings || {};
+  // A re-render rebuilds the card: keep the keyboard focus on Check again.
+  const fsel = document.activeElement && document.activeElement.id === "cRecheck" ? "#cRecheck" : null;
+  const found = (id) => list.find((x) => x.id === id);
+  fillSelect($c("sAgent"), [{ id: "claude", name: "Claude Code" }, { id: "codex", name: "Codex" }]
+    .map((x) => ({ id: x.id, name: (found(x.id) || {}).name || x.name, off: !found(x.id) })), cfg.provider);
+  const prov = found(cfg.provider), models = prov ? prov.models || [] : [];
+  fillSelect($c("sModel"), models.map((m) => ({ id: m.id, name: m.name || m.id })), cfg.model);
+  const model = models.find((m) => m.id === cfg.model);
+  fillSelect($c("sEffort"), (model && model.efforts || []).map((e) => ({ id: e, name: effName(e) })), cfg.effort);
+  $c("sAgent").closest(".srow").hidden = agent.providers === undefined;   // an older bridge: no choice to show
+  const none = agent.live && Array.isArray(agent.providers) && !agent.providers.length;
+  const had = rootEl.classList.contains("noagent");
+  rootEl.classList.toggle("noagent", none);
+  if (none) renderNoAgent();
+  if (had !== none) placeGlow();
+  if (fsel) { const el = document.querySelector(fsel); if (el && el !== document.activeElement && !el.closest("[hidden]")) el.focus({ preventScroll: true }); }
+}
+function renderNoAgent() {
+  const box = $c("cNoAgent");
+  if (!box) return;
+  box.innerHTML = `<h3 id="cNoAgentH">${C.esc(t("naTitle"))}</h3><p>${C.esc(t("naText"))}</p>`
+    + `<div class="nrow"><b>Claude Code</b><code>npm install -g @anthropic-ai/claude-code</code></div>`
+    + `<div class="nrow"><b>Codex</b><code>npm install -g @openai/codex</code></div>`
+    + `<p>${C.esc(t("naLogin"))}</p><button class="nbtn" id="cRecheck" type="button">${C.esc(t("naCheck"))}</button>`;
+}
+LANG_HOOKS.push(renderAgent);
+renderAgent();
+$c("cNoAgent").addEventListener("click", (e) => {
+  if (!e.target.closest("#cRecheck")) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) { toast(t("noBridge")); return; }
+  try { ws.send(JSON.stringify({ type: "chat-detect" })); recheckWait = true; } catch (e2) { toast(t("notSent")); }
+});
+
+// ── slash commands popup ──
+let cmdList = [], cmdSel = 0, cmdShut = null;   // cmdShut: the text Esc closed the popup on
+function renderCmds() {
+  const box = $c("cCmds"), v = cInput.value;
+  // Codex runs only /clear: never the Claude list or its fallback.
+  const list = agentProvider() === "codex" ? CODEX_COMMANDS
+    : chat.commands && chat.commands.length ? chat.commands : C.FALLBACK_COMMANDS;
+  const was = cmdList.length;
+  cmdList = v.charAt(0) === "/" && cmdShut !== v ? C.matchCommands(list, v) : [];
+  if (!cmdList.length && !was) return;
+  if (cmdSel >= cmdList.length) cmdSel = 0;
+  box.hidden = !cmdList.length;
+  cInput.setAttribute("aria-expanded", cmdList.length ? "true" : "false");
+  if (!cmdList.length) { box.innerHTML = ""; cInput.removeAttribute("aria-activedescendant"); return; }
+  box.innerHTML = cmdList.map((c, i) => `<div class="cmd" role="option" id="cCmd${i}" data-cmd="${C.esc(c.name)}" aria-selected="${i === cmdSel}"${c.hint ? ` title="${C.esc("/" + c.name + " " + c.hint)}"` : ""}><b>/${C.esc(c.name)}</b><span>${C.esc(C.commandHint(c, uiLang))}</span></div>`).join("");
+  cInput.setAttribute("aria-activedescendant", "cCmd" + cmdSel);
+  const el = box.children[cmdSel];
+  if (el && el.scrollIntoView) el.scrollIntoView({ block: "nearest" });
+}
+function pickCmd(i) {
+  const c = cmdList[i]; if (!c) return;
+  cInput.value = "/" + c.name + " "; grow(cInput);
+  cmdShut = null; renderCmds();
+  cInput.focus(); cInput.setSelectionRange(cInput.value.length, cInput.value.length);
+}
+function cmdKey(e) {
+  if (!cmdList.length || e.isComposing) return false;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    cmdSel = (cmdSel + (e.key === "ArrowDown" ? 1 : -1) + cmdList.length) % cmdList.length;
+    renderCmds(); return true;
+  }
+  if (e.key === "Escape") { cmdShut = cInput.value; renderCmds(); return true; }
+  if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+    const typed = cInput.value.trim().toLowerCase();
+    if (e.key === "Enter" && cmdList.some((c) => "/" + c.name.toLowerCase() === typed)) return false;  // typed in full: send it
+    pickCmd(cmdSel); return true;
+  }
+  return false;
+}
+$c("cCmds").addEventListener("mousedown", (e) => {
+  e.preventDefault();   // keep the focus in the input
+  const el = e.target.closest(".cmd");
+  if (el) pickCmd(cmdList.findIndex((c) => c.name === el.dataset.cmd));
+});
+
+function qsHtml(m, ans) {
+  const n = m.questions.length, done = m.questions.filter((_, i) => ans[m.id + "-" + i] !== undefined).length;
+  return `<div class="qs"><div class="qs-head"><span>${t("answers", { d: done, n })}</span><i style="--p:${done / n}" aria-hidden="true"></i></div>${m.questions.map((q, i) => {
+    const a = ans[m.id + "-" + i];
+    return `<div class="qa${a !== undefined ? " done" : ""}"><div class="qq"><span class="qn">${a !== undefined ? CHECK : i + 1}</span><span>${C.renderText(q)}</span></div>${a !== undefined
+      ? `<div class="qans">${C.esc(a)}</div>`
+      : `<form class="qf" data-k="${m.id}-${i}"><textarea rows="1" placeholder="${t("yourAnswer")}" aria-label="${t("answerTo", { i: i + 1 })}"></textarea><button type="submit" class="qsend" aria-label="${t("sendAnswer")}" title="${t("send")}">${SEND_SVG}</button></form>`}</div>`;
+  }).join("")}</div>`;
+}
+
+// The notice card at the end of the chat. Re-run beats Update, as in the bar.
+const REFRESH_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><path d="M3.68 13V11.33C3.68 6.73 7.44 3 12.08 3C15.12 3 17.78 4.6 19.25 7M2 11.33L3.68 13L5.36 11.33"/><path d="M20.31 11V12.67C20.31 17.27 16.54 21 11.88 21C8.83 21 6.16 19.4 4.68 17M22 12.67L20.31 11L18.63 12.67"/></g></svg>';
+const RESTART_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.36 8.05L17.66 7.34C14.53 4.22 9.47 4.22 6.34 7.34C3.22 10.47 3.22 15.53 6.34 18.66C9.47 21.78 14.53 21.78 17.66 18.66C19.47 16.84 20.23 14.37 19.94 12M18.36 3.81V8.05H14.12"/></svg>';
+function noticeKind() {
+  if (outdated && outdatedTo !== skips.rerun) return "rerun";
+  if (update && update.latest && update.latest !== skips.update) return "update";
+  return null;
+}
+function noticeHtml() {
+  const kind = noticeKind();
+  if (!kind) return "";
+  const [icon, title, sub, go] = kind === "rerun"
+    ? [RESTART_SVG, t("rerunTitle"), t("rerunSub"), t("rerunGo")]
+    : [REFRESH_SVG, t("updTitle", { v: C.esc(update.latest) }),
+       (update.current ? t("updYours", { c: C.esc(update.current) }) : "") + t("updSub"), t("updGo")];
+  return `<div class="mrow notice" data-kind="${kind}" role="status"><div class="ncard"><div class="nhead"><span class="nicon">${icon}</span><div class="ntext"><b>${title}</b><span>${sub}</span></div></div>`
+    + `<div class="nacts"><button type="button" class="nbtn primary" data-n="go">${go}</button><button type="button" class="nbtn" data-n="skip">${t("skip")}</button></div></div></div>`;
+}
+
+function rowHtml(m, last, ans) {
+  const quote = m.quote ? `<button type="button" class="mq" data-goto="${m.quote.id}"><b>${whoName(m.quote)}</b><span>${C.esc(m.quote.text)}</span></button>` : "";
+  const imgs = (m.images || []).map((u) => `<img class="mimg" src="${C.esc(BRIDGE + u)}" alt="">`).join("");
+  const acts = m.actions && m === last && m.from === "claude" && !chat.busy
+    ? `<div class="acts">${m.actions.map((x, i) => `<button type="button" class="act" data-act="${C.esc(x)}"><span class="ak" aria-hidden="true">${C.actionLetter(i)}</span><span>${C.esc(x)}</span></button>`).join("")}</div>` : "";
+  const text = (m.text || "").trim();
+  const bubble = text || m.questions || acts ? `<div class="msg ${m.from}${m.from === "system" && !m.error ? " info" : ""}">${quote}${C.renderText(text)}${m.questions ? qsHtml(m, ans) : ""}${acts}</div>` : quote;
+  return `<div class="mrow ${m.from}" data-mid="${m.id}">${imgs}${bubble}<div class="mfoot"><small class="meta">${hhmm(m.t)}</small>${m.from === "system" ? "" : `<button type="button" class="qbtn" data-q="${m.id}" aria-label="${t("quote")}" title="${t("quote")}">${QUOTE_SVG}</button>`}</div></div>`;
+}
+
+// Follow new text while the list is at the bottom. Only a scroll up by the user stops this.
+// A layout change (typing line, compose height, a photo that loads late) can fire a scroll
+// event too, so a position at or below the last autoscroll still counts as the bottom.
+let chatStick = true, autoTop = 0;
+// The settings page hides the list. A hidden list has no height, so it can not follow or
+// measure anything: the browser drops its scroll position to 0. chatShown() guards that.
+const chatShown = () => !rootEl.classList.contains("settings-open");
+function stickBottom() { if (!chatShown()) return; cMsgs.scrollTop = cMsgs.scrollHeight; autoTop = cMsgs.scrollTop; }
+cMsgs.addEventListener("scroll", () => {
+  if (!chatShown()) return;
+  chatStick = cMsgs.scrollHeight - cMsgs.scrollTop - cMsgs.clientHeight < 40 || cMsgs.scrollTop >= autoTop - 2;
+});
+// code.js resizes the window after a scale change or a mode switch: keep the bottom in view.
+window.addEventListener("resize", () => { if (uiMode === "chat" && chatStick) stickBottom(); });
+// A photo gets its height only when it loads, after the list was scrolled.
+cMsgs.addEventListener("load", (e) => { if (e.target.tagName === "IMG" && chatStick) stickBottom(); }, true);
+// The glow sits on the top edge of the compose box. The box grows with the typing line, quote and photos,
+// so a fixed offset hides the glow behind it.
+const cComposeEl = $c("cCompose");
+function placeGlow() { $c("cGlow").style.bottom = (cComposeEl.offsetHeight + 8 - 7) + "px"; }
+if (typeof ResizeObserver === "function") new ResizeObserver(placeGlow).observe(cComposeEl);
+
+function renderChat() {
+  document.body.classList.toggle("cbusy", chat.busy);
+  if (uiMode !== "chat") return;
+  const box = cMsgs;
+  if (!box._seen) chatStick = true;
+  const ty = $c("cTyping");
+  ty.hidden = !chat.busy; // before the scroll: the typing line makes the list shorter
+  $c("cGlow").classList.toggle("on", chat.busy);
+  const ans = {};
+  chat.messages.forEach((x) => { if (x.answer) ans[x.answer.msg + "-" + x.answer.i] = x.text; });
+  const last = chat.messages[chat.messages.length - 1];
+  let html = chat.messages.map((m) => rowHtml(m, last, ans)).join("");
+  if (chat.stream) html += `<div class="mrow claude"><div class="msg claude stream">${C.renderText(chat.stream)}</div></div>`;
+  if (!html) html = `<div class="hint">${t("empty")}</div>`;
+  html += noticeHtml();
+  if (box._html !== html) {
+    const act = document.activeElement, ak = act && act.closest && act.closest(".qf") ? act.closest(".qf").dataset.k : null;
+    box.innerHTML = html; box._html = html;
+    box.querySelectorAll(".qf").forEach((f) => {
+      const t = f.querySelector("textarea");
+      if (qDraft[f.dataset.k]) { t.value = qDraft[f.dataset.k]; grow(t); }
+      if (f.dataset.k === ak || f.dataset.k === focusNext) t.focus({ preventScroll: true });
+    });
+    focusNext = null;
+    box._seen = true;
+  }
+  if (chatStick) stickBottom();
+  if (chat.busy) {
+    const cur = chat.activity[chat.activity.length - 1];
+    const txt = (stopping ? t("stopping") : cur ? cur.text : chat.stream ? t("writing") : t("thinking")) + "…";
+    if ($c("cStep").textContent !== txt) $c("cStep").textContent = txt;
+    const sec = Math.max(0, Math.round((Date.now() - busySince) / 1000));
+    $c("cTime").textContent = sec < 60 ? t("sec", { n: sec }) : t("min", { n: Math.floor(sec / 60) });
+    $c("cStop").disabled = stopping;
+  }
+}
+setInterval(() => { if (chat.busy && uiMode === "chat") renderChat(); }, 1000);
+
+function setMode(mode) {
+  uiMode = mode === "chat" ? "chat" : "bar";
+  if (uiMode !== "chat") openSettings(false);
+  if (uiMode === "chat") unread = false;
+  render();
+  if (uiMode === "chat") { cMsgs._seen = false; cMsgs._html = ""; renderChat(); (onboardOn ? $c("onNext") : cInput).focus(); }
+}
+
+function grow(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 140) + "px"; }
+function setQuote(id) {
+  const m = id && chat.messages.find((x) => x.id === id), bar = $c("cQbar");
+  quoteId = m ? id : null; bar.hidden = !m;
+  if (m) { bar.querySelector("b").textContent = whoName(m); bar.querySelector("span").textContent = quoteText(m); cInput.focus(); }
+}
+function renderAtt() {
+  const box = $c("cAtt"); box.hidden = !attached.length;
+  box.innerHTML = attached.map((u, i) => `<div class="th"><img src="${u}" alt=""><button type="button" data-rm="${i}" aria-label="${t("unphoto")}" title="${t("unphoto")}">${XS}</button></div>`).join("");
+}
+// photos: shrunk here to 1600 px JPEG and sent as data URLs
+function shrink(file) {
+  return new Promise((ok, bad) => {
+    const url = URL.createObjectURL(file), im = new Image();
+    im.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(im.naturalWidth, im.naturalHeight)), c = document.createElement("canvas");
+      c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+      const g = c.getContext("2d"); g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); g.drawImage(im, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url); ok(c.toDataURL("image/jpeg", 0.86));
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); bad(); };
+    im.src = url;
+  });
+}
+async function addFiles(files) {
+  for (const f of files) {
+    if (!/^image\//.test(f.type) || attached.length >= 8) continue;
+    try { attached.push(await shrink(f)); } catch (e) { toast(t("noPhoto")); }
+  }
+  renderAtt();
+}
+
+$c("chatbtn").onclick = () => {
+  parent.postMessage({ pluginMessage: { type: "ui-mode", mode: uiMode === "chat" ? "bar" : "chat" } }, "*");
+};
+cInput.addEventListener("input", () => { grow(cInput); cmdSel = 0; if (cmdShut !== cInput.value) cmdShut = null; renderCmds(); });
+cInput.addEventListener("keydown", (e) => {
+  if (cmdKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); cCompose.requestSubmit(); }
+});
+// Images from the clipboard. Some apps fill only clipboardData.items, not files.
+function clipImages(cd) {
+  if (!cd) return [];
+  let fs = [...(cd.files || [])];
+  if (!fs.length) fs = [...(cd.items || [])].filter((it) => it.kind === "file").map((it) => it.getAsFile()).filter(Boolean);
+  return fs.filter((f) => /^image\//.test(f.type));
+}
+cInput.addEventListener("paste", (e) => {
+  const fs = clipImages(e.clipboardData);
+  if (fs.length) { e.preventDefault(); addFiles(fs); }
+});
+$c("cQbarX").onclick = () => setQuote(null);
+$c("cClip").onclick = () => $c("cFile").click();
+$c("cFile").addEventListener("change", (e) => { addFiles([...e.target.files]); e.target.value = ""; });
+$c("cAtt").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (b) { attached.splice(+b.dataset.rm, 1); renderAtt(); } });
+$c("cStop").onclick = () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { toast(t("noBridge")); return; }
+  stopping = true; renderChat();
+  try { ws.send(JSON.stringify({ type: "chat-stop" })); } catch (e) { stopping = false; renderChat(); toast(t("notStopped")); }
+};
+cCompose.addEventListener("submit", (e) => {
+  e.preventDefault();
+  const text = cInput.value.trim(), images = attached.slice(), q = quoteId;
+  if (!text && !images.length) return;
+  const body = { text };
+  if (images.length) body.images = images;
+  if (q) body.quote = q;
+  if (!chatSend(body)) return;
+  lastSent = body;
+  cInput.value = ""; grow(cInput); renderCmds(); attached = []; renderAtt(); setQuote(null);
+  cMsgs._seen = false;  // jump to the bottom when my message lands
+  if (welcomeOn && closeWelcome()) cInput.focus();  // the first message from the welcome screen
+});
+cMsgs.addEventListener("click", (e) => {
+  const nb = e.target.closest(".notice [data-n]");
+  if (nb) {
+    const kind = nb.closest(".notice").dataset.kind;
+    if (nb.dataset.n === "go") {
+      if (kind === "rerun") parent.postMessage({ pluginMessage: { type: "rerun" } }, "*");
+      else openUpdate();
+      return;
+    }
+    const version = kind === "rerun" ? outdatedTo : update.latest;
+    skips = Object.assign({}, skips, { [kind]: version });
+    parent.postMessage({ pluginMessage: { type: "notice-skip", kind, version } }, "*");
+    render(); renderChat();
+    return;
+  }
+  const qb = e.target.closest(".qbtn"); if (qb) { setQuote(+qb.dataset.q); return; }
+  const g = e.target.closest(".mq");
+  if (g) {
+    const row = cMsgs.querySelector(`.mrow[data-mid="${g.dataset.goto}"]`);
+    if (row) { row.scrollIntoView({ block: "center", behavior: "smooth" }); row.classList.add("flash"); setTimeout(() => row.classList.remove("flash"), 1200); }
+    else toast(t("gone"));
+    return;
+  }
+  const b = e.target.closest(".act"); if (!b) return;
+  b.closest(".acts").querySelectorAll(".act").forEach((x) => x.disabled = true);
+  if (chatSend({ text: b.dataset.act })) cMsgs._seen = false;
+  else b.closest(".acts").querySelectorAll(".act").forEach((x) => x.disabled = false);
+});
+cMsgs.addEventListener("input", (e) => { const f = e.target.closest(".qf"); if (!f) return; qDraft[f.dataset.k] = e.target.value; grow(e.target); });
+cMsgs.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && e.target.closest(".qf")) { e.preventDefault(); e.target.closest(".qf").requestSubmit(); }
+});
+cMsgs.addEventListener("submit", (e) => {
+  const f = e.target.closest(".qf"); if (!f) return;
+  e.preventDefault();
+  const t = f.querySelector("textarea"), text = t.value.trim(); if (!text) { t.focus(); return; }
+  const [msg, i] = f.dataset.k.split("-").map(Number);
+  if (!chatSend({ text, answer: { msg, i } })) return;
+  f.classList.add("sending"); t.disabled = true;
+  delete qDraft[f.dataset.k];
+  const next = [...f.closest(".qs").querySelectorAll(".qf")].find((x) => x !== f);
+  focusNext = next ? next.dataset.k : null;
+});
+
+// ─── Settings page: interface scale, theme and language ───────────────────
+// code.js stores them in figma.clientStorage and sends them on start. A tap
+// here applies them at once and sends them to code.js, which resizes the
+// window by the scale. System theme follows the class Figma puts on <html>.
+const SCALES = [0.9, 1, 1.1, 1.25], THEMES = ["system", "light", "dark"], LANGS = ["uk", "en"];
+const settings = { scale: 1, theme: "system", lang: "uk" };
+function applyTheme() {
+  const c = rootEl.classList;
+  const dark = settings.theme === "dark" || (settings.theme === "system" && (c.contains("figma-dark")
+    || (!c.contains("figma-light") && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches)));
+  if (c.contains("dark") !== dark) c.toggle("dark", dark);
+}
+function applySettings(s) {
+  s = s || {};
+  settings.scale = SCALES.indexOf(s.scale) >= 0 ? s.scale : 1;
+  settings.theme = THEMES.indexOf(s.theme) >= 0 ? s.theme : "system";
+  settings.lang = LANGS.indexOf(s.lang) >= 0 ? s.lang : "uk";
+  rootEl.style.setProperty("--ui-scale", String(settings.scale));
+  applyTheme();
+  if (settings.lang !== uiLang || rootEl.lang !== uiLang) setLang(settings.lang);
+  // The settings page dropdowns follow; setting a value moves no focus and fires no change.
+  $c("sScale").value = String(settings.scale); $c("sTheme").value = settings.theme; $c("sLang").value = settings.lang;
+  document.querySelectorAll("#onboard [data-scale]").forEach((b) => b.setAttribute("aria-checked", String(+b.dataset.scale === settings.scale)));
+  document.querySelectorAll("#onboard [data-theme]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.theme === settings.theme)));
+  document.querySelectorAll("#onboard [data-lang]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.lang === settings.lang)));
+}
+// A new language: every text at once, and the bridge learns it for the chat (chat-load).
+function setLang(lang) {
+  const changed = lang !== uiLang;
+  uiLang = lang;
+  applyLang();
+  render();
+  renderChat();
+  renderCmds();
+  renderAtt();
+  if (quoteId) $c("cQbar").querySelector("b").textContent = whoName(chat.messages.find((x) => x.id === quoteId));
+  if (changed) chatLoad();
+}
+function saveSettings(patch) {
+  applySettings(Object.assign({}, settings, patch));
+  parent.postMessage({ pluginMessage: { type: "settings", scale: settings.scale, theme: settings.theme, lang: settings.lang } }, "*");
+}
+// Back in the chat: at the bottom if the list was there, else at the same place.
+let chatTop = 0;
+function openSettings(on) {
+  const was = rootEl.classList.contains("settings-open");
+  if (on && !was) chatTop = cMsgs.scrollTop;
+  rootEl.classList.toggle("settings-open", on);
+  if (on || !was) return;
+  if (chatStick) stickBottom(); else cMsgs.scrollTop = chatTop;
+}
+// Figma switches figma-light / figma-dark live when the user changes its theme.
+if (typeof MutationObserver === "function") new MutationObserver(applyTheme).observe(rootEl, { attributes: true, attributeFilter: ["class"] });
+if (typeof matchMedia === "function") { const mq = matchMedia("(prefers-color-scheme: dark)"); if (mq.addEventListener) mq.addEventListener("change", applyTheme); }
+$c("setbtn").onclick = () => { if (onboardOn) finishOnboard(); if (welcomeOn) closeWelcome(); openSettings(!rootEl.classList.contains("settings-open")); };
+$c("sBack").onclick = () => { openSettings(false); (rootEl.classList.contains("noagent") ? $c("cRecheck") || cInput : cInput).focus(); };
+// Every setting is a dropdown. A change from code (applySettings, renderAgent) fires no
+// change event, so only the user sends, one message per change.
+// Scale, theme and language go to code.js (saveSettings), like the onboarding choices.
+const PAGE_KEY = { sScale: "scale", sTheme: "theme", sLang: "lang" };
+// The agent dropdowns: a bridge setting, it never goes to code.js.
+const AGENT_KEY = { sAgent: "provider", sModel: "model", sEffort: "effort" };
+$c("settings").addEventListener("change", (e) => {
+  const sel = e.target, pk = sel && PAGE_KEY[sel.id];
+  if (pk) { saveSettings({ [pk]: pk === "scale" ? +sel.value : sel.value }); return; }
+  const k = sel && AGENT_KEY[sel.id];
+  if (!k) return;
+  const o = sel.options[sel.selectedIndex];
+  if (!o || o.disabled) { renderAgent(); return; }   // not a real choice: show the settings again
+  agentSend({ [k]: o.value });
+});
+// Window resize by the edge and corner zones. The UI sends the new size at
+// scale 1, at most once per frame, and done once at the end. code.js clamps it,
+// resizes the window and stores the size. The window always grows to the right
+// and down (see docs/CHAT.md, Window size).
+let rz = null;
+function rzSize(e) {
+  const dx = e.screenX - rz.x, dy = e.screenY - rz.y, ed = rz.edge, k = settings.scale || 1;
+  let w = rz.w, h = rz.h;
+  if (/e$/.test(ed)) w += dx; else if (/w$/.test(ed)) w -= dx;
+  if (/^s/.test(ed)) h += dy; else if (/^n/.test(ed)) h -= dy;
+  return { w: Math.round(w / k), h: Math.round(h / k) };
+}
+function rzPost(size, done) {
+  const m = { type: "resize", w: size.w, h: size.h };
+  if (done) m.done = true;
+  parent.postMessage({ pluginMessage: m }, "*");
+}
+function rzEnd(e) {
+  if (!rz || e.pointerId !== rz.id) return;
+  const final = e.type === "pointerup" ? rzSize(e) : rz.last;
+  const r = rz; rz = null;
+  if (r.frame) cancelAnimationFrame(r.frame);
+  try { if (r.el.hasPointerCapture(r.id)) r.el.releasePointerCapture(r.id); } catch (err) { /* already gone */ }
+  if (r.moved && final) rzPost(final, true);
+}
+document.querySelectorAll(".rz").forEach((el) => {
+  el.addEventListener("pointerdown", (e) => {
+    if (uiMode !== "chat" || e.button !== 0) return;
+    // A drag whose pointerup never reached the iframe must not block the next one.
+    if (rz) rzEnd({ type: "pointercancel", pointerId: rz.id });
+    e.preventDefault();
+    rz = { el, id: e.pointerId, edge: el.dataset.edge, x: e.screenX, y: e.screenY,
+           w: window.innerWidth, h: window.innerHeight, frame: 0, moved: false, last: null };
+    try { el.setPointerCapture(e.pointerId); } catch (err) { /* no capture */ }
+  });
+  el.addEventListener("pointermove", (e) => {
+    if (!rz || e.pointerId !== rz.id) return;
+    // No button held: the pointerup was lost outside the iframe. End the drag
+    // instead of resizing on plain hover.
+    if (e.buttons === 0) { rzEnd({ type: "pointercancel", pointerId: rz.id }); return; }
+    rz.last = rzSize(e); rz.moved = true;
+    if (!rz.frame) rz.frame = requestAnimationFrame(() => { if (rz) { rz.frame = 0; rzPost(rz.last, false); } });
+  });
+  el.addEventListener("pointerup", rzEnd);
+  el.addEventListener("pointercancel", rzEnd);
+  el.addEventListener("lostpointercapture", rzEnd);
+});
+
+// Overlay scrollbars for the list, the settings page and the welcome screen. The rail sits
+// next to the area, so renders that replace the area's innerHTML keep it. Thumb height is
+// max(24, ch*ch/sh), its place follows scrollTop. It shows on scroll or hover and fades
+// out 1 s after the last scroll. Dragging the thumb scrolls; a click does not jump.
+function overlayBar(area) {
+  const rail = document.createElement("div"), thumb = document.createElement("div");
+  rail.className = "sbar"; rail.dataset.for = area.id; rail.setAttribute("aria-hidden", "true");
+  thumb.className = "sbar-thumb"; rail.appendChild(thumb);
+  area.after(rail);
+  let h = 0, hover = false, drag = null, timer = 0, frame = 0, last = "";
+  // Layout reads and style writes run once per frame: a streaming reply mutates the list
+  // many times per frame, and each read would force a reflow. The rail sits outside the
+  // area, so these writes do not wake the observers again.
+  function update() {
+    frame = 0;
+    const ch = area.clientHeight, sh = area.scrollHeight, ov = sh - ch;
+    const show = ch > 0 && ov > 0;
+    if (rail.hidden !== !show) rail.hidden = !show;
+    if (!show) { last = ""; return; }
+    h = Math.max(24, ch * ch / sh);
+    const top = area.offsetTop, y = Math.min(1, area.scrollTop / ov) * (ch - h);
+    const key = top + "/" + ch + "/" + h + "/" + y;
+    if (key === last) return;
+    last = key;
+    rail.style.top = top + "px"; rail.style.height = ch + "px";
+    thumb.style.height = h + "px";
+    thumb.style.transform = "translateY(" + y + "px)";
+  }
+  function queue() {
+    if (frame) return;
+    frame = typeof requestAnimationFrame === "function" ? requestAnimationFrame(update) : setTimeout(update, 16);
+  }
+  // pointer clientY is in zoomed px under html zoom (UI scale), layout sizes are not
+  function zoom() {
+    const r = area.getBoundingClientRect().height, o = area.offsetHeight;
+    const z = r > 0 && o > 0 ? r / o : 1;
+    return isFinite(z) && z > 0 ? z : 1;
+  }
+  function fade() {
+    clearTimeout(timer);
+    timer = setTimeout(() => { if (!hover && !drag) rail.classList.remove("on"); }, 1000);
+  }
+  area.addEventListener("scroll", () => { queue(); rail.classList.add("on"); fade(); }, { passive: true });
+  [area, thumb].forEach((el) => {
+    el.addEventListener("mouseenter", () => { hover = true; queue(); rail.classList.add("on"); });
+    el.addEventListener("mouseleave", () => { hover = false; fade(); });
+  });
+  function end(e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null; rail.classList.remove("drag"); fade();
+    try { if (thumb.hasPointerCapture(e.pointerId)) thumb.releasePointerCapture(e.pointerId); } catch (err) { /* already gone */ }
+  }
+  thumb.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    if (drag) end({ pointerId: drag.id });
+    e.preventDefault();
+    drag = { id: e.pointerId, y: e.clientY, top: area.scrollTop, z: zoom() };
+    try { thumb.setPointerCapture(e.pointerId); } catch (err) { /* no capture */ }
+    rail.classList.add("drag", "on");
+  });
+  thumb.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (e.buttons === 0) { end(e); return; }  // the pointerup was lost outside the iframe
+    const ch = area.clientHeight, ov = area.scrollHeight - ch;
+    area.scrollTop = Math.max(0, Math.min(ov, drag.top + (e.clientY - drag.y) / drag.z * ov / Math.max(1, ch - h)));
+  });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach((t) => thumb.addEventListener(t, end));
+  if (typeof ResizeObserver === "function") new ResizeObserver(queue).observe(area);
+  window.addEventListener("resize", queue);
+  if (typeof MutationObserver === "function") new MutationObserver(queue).observe(area, { childList: true, subtree: true, characterData: true });
+  update();
+}
+["cMsgs", "settings", "welcome"].forEach((id) => overlayBar($c(id)));
+
+applySettings(settings);
+
+// ─── Welcome screen: the first screen of a file (docs/CHAT.md) ────────────
+// code.js sends { type:"welcome", show } on start and opens the chat size when
+// show is true. The chat composer (#cCompose) moves to the bottom of the
+// screen while it is open. A sent message, Esc or the settings link closes it
+// and posts welcome-done once; code.js then marks the file in its pluginData.
+// Texts per language, picked by uiLang.
+const WELCOME_TEXT = {
+  uk: {
+    label: "Знайомство з Claude",
+    title: "Привіт. Це Claude у Figma",
+    intro: "Він працює в цьому файлі разом з тобою.",
+    rows: [
+      { icon: "chat", text: "Напиши Claude, що зробити у файлі." },
+      { icon: "file", text: "Один файл має одну розмову. Вона зберігається." },
+      { icon: "photo", text: "Встав фото з буфера обміну." },
+      { icon: "slash", text: "Набери знак /, щоб вибрати команду." },
+      { icon: "canvas", text: "Claude змінює полотно через Figmosha." },
+    ],
+  },
+  en: {
+    label: "Meet Claude",
+    title: "Hi. This is Claude in Figma",
+    intro: "It works in this file together with you.",
+    rows: [
+      { icon: "chat", text: "Tell Claude what to do in the file." },
+      { icon: "file", text: "One file has one conversation. It is saved." },
+      { icon: "photo", text: "Paste a photo from the clipboard." },
+      { icon: "slash", text: "Type / to choose a command." },
+      { icon: "canvas", text: "Claude changes the canvas through Figmosha." },
+    ],
+  },
+};
+// Solar linear icons, 2px stroke.
+const WELCOME_ICONS = {
+  chat: '<path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2S2 6.477 2 12c0 1.6.376 3.112 1.043 4.453c.178.356.237.763.134 1.148l-.595 2.226a1.3 1.3 0 0 0 1.591 1.592l2.226-.596a1.63 1.63 0 0 1 1.149.133A9.96 9.96 0 0 0 12 22Z"/><path d="M8 10.5h8M8 14h5.5"/>',
+  file: '<path d="M11 22h2c3.771 0 5.657 0 6.828-1.172S21 17.771 21 14v-4c0-3.771 0-5.657-1.172-6.828S16.771 2 13 2h-2C7.229 2 5.343 2 4.172 3.172S3 6.229 3 10v4c0 3.771 0 5.657 1.172 6.828S7.229 22 11 22Z"/><path d="M8 12h8M8 8h8m-8 8h5"/>',
+  photo: '<path d="M12 22c-4.714 0-7.071 0-8.536-1.465C2 19.072 2 16.714 2 12s0-7.071 1.464-8.536C4.93 2 7.286 2 12 2s7.071 0 8.535 1.464C22 4.93 22 7.286 22 12s0 7.071-1.465 8.535C19.072 22 16.714 22 12 22Z"/><circle cx="16" cy="8" r="2"/><path d="m2 12.5l1.752-1.533a2.3 2.3 0 0 1 3.14.105l4.29 4.29a2 2 0 0 0 2.564.222l.299-.21a3 3 0 0 1 3.731.225L21 18.5"/>',
+  slash: '<path d="M13.294 7.17L12 12l-1.294 4.83"/><path d="M12 22c-4.714 0-7.071 0-8.536-1.465C2 19.072 2 16.714 2 12s0-7.071 1.464-8.536C4.93 2 7.286 2 12 2s7.071 0 8.535 1.464C22 4.93 22 7.286 22 12s0 7.071-1.465 8.535C19.072 22 16.714 22 12 22Z"/>',
+  canvas: '<path stroke-linejoin="round" d="m12.636 15.262l3.938 3.938c.408.408.612.612.84.706c.303.125.643.125.947 0c.227-.094.431-.298.839-.706s.612-.612.706-.84a1.24 1.24 0 0 0 0-.946c-.094-.228-.298-.432-.706-.839l-3.938-3.938l1.203-1.203c1.231-1.231 1.847-1.847 1.702-2.509c-.146-.661-.963-.962-2.596-1.564L10.12 5.353C6.861 4.152 5.231 3.551 4.391 4.39c-.84.84-.239 2.47.962 5.73l2.007 5.45c.602 1.633.903 2.45 1.565 2.596c.662.145 1.277-.47 2.508-1.702z"/>',
+};
+// The illustration: a canvas frame with a selected shape, the cursor of
+// Claude and a chat bubble. Colors only from tokens (see .willo in the CSS).
+const WELCOME_ART = '<svg class="willo" viewBox="0 0 232 112" aria-hidden="true" focusable="false">'
+  + '<defs><pattern id="wDots" width="12" height="12" patternUnits="userSpaceOnUse"><circle class="w-dot" cx="2" cy="2" r="1"/></pattern></defs>'
+  + '<rect width="232" height="112" fill="url(#wDots)"/>'
+  + '<rect class="w-tag" x="24" y="10" width="30" height="5" rx="2.5"/>'
+  + '<rect class="w-frame" x="24" y="20" width="132" height="80" rx="8"/>'
+  + '<rect class="w-acc" x="40" y="36" width="60" height="48" rx="6"/>'
+  + '<rect class="w-sel" x="40" y="36" width="60" height="48"/>'
+  + '<rect class="w-knob" x="37.5" y="33.5" width="5" height="5" rx="1"/><rect class="w-knob" x="97.5" y="33.5" width="5" height="5" rx="1"/>'
+  + '<rect class="w-knob" x="37.5" y="81.5" width="5" height="5" rx="1"/><rect class="w-knob" x="97.5" y="81.5" width="5" height="5" rx="1"/>'
+  + '<rect class="w-soft" x="114" y="40" width="28" height="6" rx="3"/><rect class="w-soft" x="114" y="52" width="20" height="6" rx="3"/><rect class="w-soft" x="114" y="64" width="24" height="6" rx="3"/>'
+  + '<g class="w-curg"><path class="w-cur" transform="translate(101 85)" d="M0 0v17l4.6-4.4L8 20l3-1.4l-3.3-7.2H14Z"/></g>'
+  + '<g class="w-bubg"><rect class="w-bub" x="148" y="30" width="72" height="40" rx="14"/><path class="w-bub" d="M158 64l-6 14l17-9Z"/>'
+  + '<path class="w-line" d="M162 44h44M162 56h28"/></g>'
+  + '<path class="w-spark" transform="translate(214 18)" d="M0-6C.6-1.2 1.2-.6 6 0C1.2.6.6 1.2 0 6C-.6 1.2-1.2.6-6 0C-1.2-.6-.6-1.2 0-6Z"/>'
+  + '<path class="w-spark" transform="translate(166 14) scale(.55)" d="M0-6C.6-1.2 1.2-.6 6 0C1.2.6.6 1.2 0 6C-.6 1.2-1.2.6-6 0C-1.2-.6-.6-1.2 0-6Z"/>'
+  + '</svg>';
+const welcomeEl = $c("welcome");
+// The chat composer and its toast live in #chat; the welcome borrows them, so the
+// draft, the photos and all the composer handlers are the same ones.
+function dockCompose(inWelcome) {
+  const slot = inWelcome && welcomeEl.querySelector(".wcomp");
+  if (slot) { slot.appendChild($c("cToast")); slot.appendChild(cCompose); slot.appendChild($c("cNoAgent")); }
+  else if (welcomeEl.contains(cCompose)) { const g = $c("cGlow"); g.before($c("cToast")); g.after(cCompose); cCompose.after($c("cNoAgent")); }
+  placeGlow();
+}
+function renderWelcome() {
+  const W = WELCOME_TEXT[uiLang] || WELCOME_TEXT.uk;
+  const had = welcomeEl.contains(cCompose), focused = had && cCompose.contains(document.activeElement) && document.activeElement;
+  if (had) dockCompose(false);
+  welcomeEl.setAttribute("aria-label", W.label);
+  welcomeEl.innerHTML = '<div class="wart">' + WELCOME_ART + '</div>'
+    + '<div class="whead"><h2 id="welcomeH">' + C.esc(W.title) + '</h2><p>' + C.esc(W.intro) + '</p></div>'
+    + '<ul class="wlist">' + W.rows.map((r) => '<li class="wrow"><span class="wico"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">'
+      + WELCOME_ICONS[r.icon] + '</g></svg></span><span>' + C.esc(r.text) + '</span></li>').join("") + '</ul>'
+    + '<div class="wacts"><div class="wcomp"></div></div>';
+  if (had) { dockCompose(true); if (focused) focused.focus(); }
+}
+function showWelcome(on) {
+  // Not on the run that shows the onboarding: no two intros in a row.
+  if (!on || welcomeOn || onboardShown) return;
+  welcomeOn = true;
+  openSettings(false);
+  welcomeEl.hidden = false;
+  rootEl.classList.add("welcome-open");
+  dockCompose(true);
+  cInput.focus();
+}
+// Closes the screen and tells code.js once. The window stays in the chat.
+function closeWelcome() {
+  if (!welcomeOn) return false;
+  welcomeOn = false;
+  welcomeEl.hidden = true;
+  rootEl.classList.remove("welcome-open");
+  dockCompose(false);
+  parent.postMessage({ pluginMessage: { type: "welcome-done" } }, "*");
+  if (uiMode === "chat") { cMsgs._seen = false; cMsgs._html = ""; renderChat(); }
+  return true;
+}
+// Bound again after each render (a language switch rebuilds the buttons).
+function bindWelcome() {
+}
+renderWelcome(); bindWelcome();
+LANG_HOOKS.push(() => { renderWelcome(); bindWelcome(); });
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && welcomeOn) { e.preventDefault(); if (closeWelcome()) cInput.focus(); }
+});
+
+// ─── Onboarding: the first screen of a USER (docs/CHAT.md, Onboarding) ────
+// code.js sends { type:"onboarding", show } on start, before "welcome", and
+// opens the chat size when show is true. Four steps: what it does, language,
+// theme, scale. Each choice applies at once and goes to code.js with the
+// settings message. Почати on step 4, Пропустити or Esc post onboarding-done
+// once; code.js stores the user flag and marks this file as welcomed.
+const ONBOARD_TEXT = {
+  uk: {
+    label: "Знайомство з Figmosha",
+    step: "Крок {i} з {n}",
+    skip: "Пропустити",
+    back: "Назад",
+    next: "Далі",
+    start: "Почати",
+    introTitle: "Привіт. Це Figmosha з Claude",
+    intro: "Claude працює у твоєму файлі Figma. Ти пишеш задачу. Claude її робить.",
+    rows: [
+      { icon: "chat", text: "Напиши Claude, що треба зробити." },
+      { icon: "canvas", text: "Claude сам змінює полотно." },
+      { icon: "file", text: "Кожен файл має свою розмову." },
+    ],
+    langTitle: "Обери мову",
+    langText: "Це мова інтерфейсу. Claude теж відповідає цією мовою.",
+    themeTitle: "Обери тему",
+    themeText: "Тема змінюється одразу. Перший варіант бере тему з Figma.",
+    scaleTitle: "Обери масштаб",
+    scaleText: "Вікно змінює розмір одразу.",
+    note: "Усе це можна змінити в налаштуваннях.",
+  },
+  en: {
+    label: "Getting started with Figmosha",
+    step: "Step {i} of {n}",
+    skip: "Skip",
+    back: "Back",
+    next: "Next",
+    start: "Start",
+    introTitle: "Hi, this is Figmosha with Claude",
+    intro: "Claude works right in your Figma file. You describe a task, and Claude does it.",
+    rows: [
+      { icon: "chat", text: "Tell Claude what to do." },
+      { icon: "canvas", text: "Claude edits the canvas for you." },
+      { icon: "file", text: "Each file has its own conversation." },
+    ],
+    langTitle: "Choose your language",
+    langText: "It sets the interface language. Claude replies in it too.",
+    themeTitle: "Choose a theme",
+    themeText: "The theme changes right away. The first option follows Figma.",
+    scaleTitle: "Choose a scale",
+    scaleText: "The window resizes right away.",
+    note: "You can change all of this later in Settings.",
+  },
+};
+// Solar linear icons, 2px stroke (the row icons are the welcome ones).
+const ONBOARD_ICONS = {
+  chat: WELCOME_ICONS.chat, canvas: WELCOME_ICONS.canvas, file: WELCOME_ICONS.file,
+  globe: '<path d="M22 12a10 10 0 1 1-20 0a10 10 0 0 1 20 0Z"/><path d="M16 12c0 5.523-1.79 10-4 10s-4-4.477-4-10s1.79-10 4-10s4 4.477 4 10Z"/><path d="M2 12h20"/>',
+  sun: '<circle cx="12" cy="12" r="5"/><path d="M12 2v2m0 16v2M4 12H2m20 0h-2m-.223-7.778l-2.222 2.032M4.223 4.222l2.222 2.032m0 11.302l-2.222 2.222m15.554 0l-2.222-2.222"/>',
+  moon: '<path d="M12 22c5.523 0 10-4.477 10-10c0-.463-.694-.54-.933-.143A6.5 6.5 0 0 1 15.5 15A6.5 6.5 0 0 1 9 8.5a6.5 6.5 0 0 1 3.143-5.567C12.54 2.693 12.463 2 12 2C6.477 2 2 6.477 2 12s4.477 10 10 10Z"/>',
+  monitor: '<path d="M8 17h8c2.828 0 4.243 0 5.121-.879C22 15.243 22 13.828 22 11v-1c0-3.771 0-5.657-1.172-6.828C19.657 2 17.771 2 14 2h-4C6.229 2 4.343 2 3.172 3.172C2 4.343 2 6.229 2 10v1c0 2.828 0 4.243.879 5.121C3.757 17 5.172 17 8 17Z"/><path d="M16 22H8m4-5v5m10-9H2"/>',
+  zoom: '<circle cx="11.5" cy="11.5" r="9.5"/><path d="M9 11.5h5m-2.5 2.5V9m6.717 9.218L22 22"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M13.765 2.152C13.398 2 12.932 2 12 2s-1.398 0-1.765.152a2 2 0 0 0-1.083 1.083c-.092.223-.129.484-.143.863a1.62 1.62 0 0 1-.79 1.353a1.62 1.62 0 0 1-1.567.008c-.336-.178-.579-.276-.82-.308a2 2 0 0 0-1.478.396C4.04 5.79 3.806 6.193 3.34 7s-.7 1.21-.751 1.605a2 2 0 0 0 .396 1.479c.148.192.355.353.676.555c.473.297.777.803.777 1.361s-.304 1.064-.777 1.36c-.321.203-.529.364-.676.556a2 2 0 0 0-.396 1.479c.052.394.285.798.75 1.605c.467.807.7 1.21 1.015 1.453a2 2 0 0 0 1.479.396c.24-.032.483-.13.819-.308a1.62 1.62 0 0 1 1.567.008c.483.28.77.795.79 1.353c.014.38.05.64.143.863a2 2 0 0 0 1.083 1.083C10.602 22 11.068 22 12 22s1.398 0 1.765-.152a2 2 0 0 0 1.083-1.083c.092-.223.129-.483.143-.863c.02-.558.307-1.074.79-1.353a1.62 1.62 0 0 1 1.567-.008c.336.178.579.276.819.308a2 2 0 0 0 1.479-.396c.315-.242.548-.646 1.014-1.453s.7-1.21.751-1.605a2 2 0 0 0-.396-1.479c-.148-.192-.355-.353-.676-.555A1.62 1.62 0 0 1 19.562 12c0-.558.304-1.064.777-1.36c.321-.203.529-.364.676-.556a2 2 0 0 0 .396-1.479c-.052-.394-.285-.798-.75-1.605c-.467-.807-.7-1.21-1.015-1.453a2 2 0 0 0-1.479-.396c-.24.032-.483.13-.82.308a1.62 1.62 0 0 1-1.566-.008a1.62 1.62 0 0 1-.79-1.353c-.014-.38-.05-.64-.143-.863a2 2 0 0 0-1.083-1.083Z"/>',
+  left: '<path d="m15 5l-6 7l6 7"/>',
+  right: '<path d="m9 5l6 7l-6 7"/>',
+};
+const onIcon = (name) => '<svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+  + ONBOARD_ICONS[name] + '</g></svg>';
+// The illustration: the chat panel, a dotted link and the canvas where Claude
+// edits a selected shape. Same parts and tokens as the welcome art (.willo);
+// its own pattern id, so the document has no duplicate ids.
+const ONBOARD_ART = '<svg class="willo" viewBox="0 0 232 112" aria-hidden="true" focusable="false">'
+  + '<defs><pattern id="oDots" width="12" height="12" patternUnits="userSpaceOnUse"><circle class="w-dot" cx="2" cy="2" r="1"/></pattern></defs>'
+  + '<rect width="232" height="112" fill="url(#oDots)"/>'
+  + '<rect class="w-frame" x="18" y="12" width="86" height="88" rx="10"/>'
+  + '<rect class="w-tag" x="27" y="21" width="26" height="5" rx="2.5"/>'
+  + '<rect class="w-soft" x="52" y="33" width="44" height="14" rx="7"/>'
+  + '<g class="w-bubg" style="transform-origin:28px 66px"><rect class="w-bub" x="27" y="53" width="60" height="26" rx="10"/>'
+  + '<path class="w-line" d="M36 62h40M36 70h24"/></g>'
+  + '<rect class="w-soft" x="27" y="85" width="68" height="7" rx="3.5"/>'
+  + '<path class="o-link" d="M108 66c8 0 8-10 16-10"/>'
+  + '<rect class="w-frame" x="128" y="16" width="86" height="80" rx="8"/>'
+  + '<rect class="w-acc" x="142" y="30" width="44" height="34" rx="6"/>'
+  + '<rect class="w-sel" x="142" y="30" width="44" height="34"/>'
+  + '<rect class="w-knob" x="139.5" y="27.5" width="5" height="5" rx="1"/><rect class="w-knob" x="183.5" y="27.5" width="5" height="5" rx="1"/>'
+  + '<rect class="w-knob" x="139.5" y="61.5" width="5" height="5" rx="1"/><rect class="w-knob" x="183.5" y="61.5" width="5" height="5" rx="1"/>'
+  + '<rect class="w-soft" x="142" y="73" width="40" height="6" rx="3"/><rect class="w-soft" x="142" y="84" width="26" height="6" rx="3"/>'
+  + '<g class="w-curg"><path class="w-cur" transform="translate(186 62)" d="M0 0v17l4.6-4.4L8 20l3-1.4l-3.3-7.2H14Z"/></g>'
+  + '<path class="w-spark" transform="translate(206 26)" d="M0-6C.6-1.2 1.2-.6 6 0C1.2.6.6 1.2 0 6C-.6 1.2-1.2.6-6 0C-1.2-.6-.6-1.2 0-6Z"/>'
+  + '<path class="w-spark" transform="translate(116 30) scale(.55)" d="M0-6C.6-1.2 1.2-.6 6 0C1.2.6.6 1.2 0 6C-.6 1.2-1.2.6-6 0C-1.2-.6-.6-1.2 0-6Z"/>'
+  + '</svg>';
+const ONBOARD_STEPS = 4;
+const onboardEl = $c("onboard");
+let onboardShown = false;  // shown on this run: the welcome stays closed
+let onStep = 0;
+function renderOnboard() {
+  const T = ONBOARD_TEXT[uiLang] || ONBOARD_TEXT.uk;
+  // A language switch rebuilds the screen: keep the focus on the same control.
+  const a = document.activeElement;
+  let keep = null;
+  if (a && onboardEl.contains(a)) keep = a.id ? "#" + a.id : ["lang", "theme", "scale"].filter((k) => a.dataset[k]).map((k) => '[data-' + k + '="' + a.dataset[k] + '"]')[0] || null;
+  const head = (i, icon, title, text) => '<div class="ohead">' + (icon ? '<span class="oico">' + onIcon(icon) + '</span>' : '')
+    + '<h2 id="onH' + i + '">' + C.esc(title) + '</h2><p>' + C.esc(text) + '</p></div>';
+  const radio = (k, v, inner, attrs) => '<button type="button" role="radio" aria-checked="false" data-' + k + '="' + v + '"' + (attrs || "") + '>' + inner + '</button>';
+  onboardEl.setAttribute("aria-label", T.label);
+  onboardEl.innerHTML = '<div class="otop"><div class="odots" aria-hidden="true">' + '<span class="odot"></span>'.repeat(ONBOARD_STEPS) + '</div>'
+    + '<p class="ovh" id="onStepN" aria-live="polite"></p>'
+    + '<button id="onSkip" type="button">' + C.esc(T.skip) + '</button></div>'
+    + '<div class="ostep" role="group" aria-labelledby="onH1"><div class="oart">' + ONBOARD_ART + '</div>' + head(1, null, T.introTitle, T.intro)
+    + '<ul class="olist">' + T.rows.map((r) => '<li class="orow"><span class="oico">' + onIcon(r.icon) + '</span><span>' + C.esc(r.text) + '</span></li>').join("") + '</ul></div>'
+    + '<div class="ostep" role="group" aria-labelledby="onH2">' + head(2, "globe", T.langTitle, T.langText)
+    + '<div class="ochoices" role="radiogroup" aria-labelledby="onH2">'
+    + radio("lang", "uk", "Українська", ' class="ochoice" lang="uk"') + radio("lang", "en", "English", ' class="ochoice" lang="en"') + '</div></div>'
+    + '<div class="ostep" role="group" aria-labelledby="onH3">' + head(3, "sun", T.themeTitle, T.themeText)
+    + '<div class="ochoices" role="radiogroup" aria-labelledby="onH3">'
+    + [["system", "monitor", "themeSystem"], ["light", "sun", "themeLight"], ["dark", "moon", "themeDark"]]
+      .map(([v, icon, key]) => radio("theme", v, '<span class="oico">' + onIcon(icon) + '</span><span>' + C.esc(t(key)) + '</span>', ' class="ochoice"')).join("") + '</div></div>'
+    + '<div class="ostep" role="group" aria-labelledby="onH4">' + head(4, "zoom", T.scaleTitle, T.scaleText)
+    + '<div class="oseg" role="radiogroup" aria-labelledby="onH4">'
+    + SCALES.map((k) => radio("scale", String(k), Math.round(k * 100) + "%", ' style="--k:' + k + '"')).join("") + '</div>'
+    + '<p class="onote">' + onIcon("gear") + '<span>' + C.esc(T.note) + '</span></p></div>'
+    + '<div class="oacts"><button id="onBack" type="button"><span>' + C.esc(T.back) + '</span></button>'
+    + '<button id="onNext" type="button"><span></span></button></div>';
+  syncOnboard(0);
+  if (keep) (onboardEl.querySelector(keep) || $c("onNext")).focus();
+}
+// Shows the current step. dir: 1 forward, -1 back (the step animates in), 0 none.
+function syncOnboard(dir) {
+  const T = ONBOARD_TEXT[uiLang] || ONBOARD_TEXT.uk;
+  onboardEl.querySelectorAll(".ostep").forEach((el, i) => {
+    el.hidden = i !== onStep;
+    el.classList.toggle("oin", i === onStep && dir !== 0);
+    el.classList.toggle("oback", dir < 0);
+  });
+  onboardEl.querySelectorAll(".odot").forEach((el, i) => {
+    el.classList.toggle("on", i === onStep);
+    el.classList.toggle("past", i < onStep);
+    if (i === onStep) el.setAttribute("aria-current", "step"); else el.removeAttribute("aria-current");
+  });
+  $c("onStepN").textContent = T.step.replace("{i}", onStep + 1).replace("{n}", ONBOARD_STEPS);
+  $c("onBack").hidden = onStep === 0;
+  $c("onNext").querySelector("span").textContent = onStep === ONBOARD_STEPS - 1 ? T.start : T.next;
+  onRadios();
+}
+// The checked state, and one Tab stop per group (the checked card), like native radios.
+function onRadios() {
+  onboardEl.querySelectorAll("[data-scale]").forEach((b) => b.setAttribute("aria-checked", String(+b.dataset.scale === settings.scale)));
+  onboardEl.querySelectorAll("[data-theme]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.theme === settings.theme)));
+  onboardEl.querySelectorAll("[data-lang]").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.lang === settings.lang)));
+  onboardEl.querySelectorAll('[role="radiogroup"]').forEach((g) => {
+    const all = [...g.querySelectorAll('[role="radio"]')];
+    const on = all.find((b) => b.getAttribute("aria-checked") === "true") || all[0];
+    all.forEach((b) => { b.tabIndex = b === on ? 0 : -1; });
+  });
+}
+function onGo(d) {
+  if (!onboardOn) return;
+  const n = onStep + d;
+  if (n < 0) return;
+  if (n >= ONBOARD_STEPS) { if (finishOnboard()) cInput.focus(); return; }
+  onStep = n;
+  syncOnboard(d);
+  onboardEl.scrollTop = 0;
+  const a = document.activeElement;
+  if (!a || !onboardEl.contains(a) || a.closest("[hidden]")) $c("onNext").focus();
+}
+function showOnboard(on) {
+  if (!on || onboardOn || onboardShown) return;
+  onboardShown = onboardOn = true;
+  // A welcome that came first gives way. code.js marks the file on done.
+  if (welcomeOn) { welcomeOn = false; welcomeEl.hidden = true; rootEl.classList.remove("welcome-open"); dockCompose(false); }
+  openSettings(false);
+  onStep = 0;
+  renderOnboard();
+  syncOnboard(1);
+  onboardEl.hidden = false;
+  rootEl.classList.add("onboard-open");
+  $c("onNext").focus();
+}
+// Closes the screen and tells code.js once. The window stays in the chat.
+function finishOnboard() {
+  if (!onboardOn) return false;
+  onboardOn = false;
+  onboardEl.hidden = true;
+  rootEl.classList.remove("onboard-open");
+  parent.postMessage({ pluginMessage: { type: "onboarding-done" } }, "*");
+  if (uiMode === "chat") { cMsgs._seen = false; cMsgs._html = ""; renderChat(); }
+  return true;
+}
+// Bound once on the section: a language switch rebuilds what is inside.
+onboardEl.addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b || !onboardOn) return;
+  if (b.id === "onNext") onGo(1);
+  else if (b.id === "onBack") onGo(-1);
+  else if (b.id === "onSkip") { if (finishOnboard()) cInput.focus(); }
+  else if (b.dataset.scale) saveSettings({ scale: +b.dataset.scale });
+  else if (b.dataset.theme) saveSettings({ theme: b.dataset.theme });
+  else if (b.dataset.lang) saveSettings({ lang: b.dataset.lang });
+  onRadios();
+});
+onboardEl.addEventListener("keydown", (e) => {
+  if (!onboardOn) return;
+  // Enter would also click: act here and drop the click.
+  if (e.key === "Enter" && e.target.id === "onNext") { e.preventDefault(); onGo(1); return; }
+  // Arrow keys move inside a radio group and pick, like native radios.
+  const r = e.target.closest && e.target.closest('[role="radio"]');
+  const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+  if (!r || !step) return;
+  e.preventDefault();
+  const all = [...r.parentElement.querySelectorAll('[role="radio"]')];
+  const nb = all[(all.indexOf(r) + step + all.length) % all.length];
+  nb.click();
+  // The click may rebuild the screen (language): focus the new button.
+  (onboardEl.querySelector(nb.dataset.lang ? '[data-lang="' + nb.dataset.lang + '"]' : nb.dataset.theme ? '[data-theme="' + nb.dataset.theme + '"]' : '[data-scale="' + nb.dataset.scale + '"]') || nb).focus();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && onboardOn) { e.preventDefault(); if (finishOnboard()) cInput.focus(); }
+});
+renderOnboard();
+LANG_HOOKS.push(renderOnboard);
 
 connect();
 </script>

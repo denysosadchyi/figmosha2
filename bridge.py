@@ -30,6 +30,8 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web, WSMsgType
 
+import chat
+
 
 PENDING: dict = {}        # rid -> {"future", "logs", "t0", "conn"}
 PLUGINS: dict = {}        # conn_id -> {"ws", "fileKey", "name", "docSig"}
@@ -92,13 +94,16 @@ def bridge_outdated() -> bool:
 # the plugin bar can offer an Update button. Releases, not commits: a README
 # typo pushed to master is not a new version. It never blocks anything and
 # stays silent on any failure. Set FIGMOSHA_NO_UPDATE_CHECK=1 to turn it off.
+# FIGMOSHA_FAKE_LATEST=9.9.9 pretends that version is released, without asking
+# GitHub: a live test of the bar and the chat card.
 #
 # Releasing (see AGENTS.md → Releasing): bump VERSION here, move CHANGELOG's
 # "Unreleased" under the new version, tag vX.Y.Z and push the tag.
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 REPO = "denysosadchyi/figmosha2"
 UPDATE_EVERY = 6 * 60 * 60   # seconds between checks
+UPDATE_FIRST_DELAY = 5       # seconds: let the plugins reconnect first
 UPDATE: dict | None = None   # {"latest", "current", "url"} once a newer release exists
 _SEMVER = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 
@@ -147,22 +152,24 @@ async def set_update(latest):
         print(f"[update] Figmosha {latest} is released (this is {VERSION}) — "
               f"git pull, restart the bridge, re-run the plugin")
     for _, info in _live_plugins():
-        await _send_update(info["ws"])
+        # latest None withdraws an offer the plugin already shows.
+        await _send_update(info["ws"], clear=True)
 
 
-async def _send_update(ws):
-    if not UPDATE:
+async def _send_update(ws, clear=False):
+    if not UPDATE and not clear:
         return
+    body = {"type": "update", **UPDATE} if UPDATE else {"type": "update", "latest": None}
     try:
-        await ws.send_str(json.dumps({"type": "update", **UPDATE}))
+        await ws.send_str(json.dumps(body))
     except Exception:
         pass
 
 
 async def _update_loop(app):
-    await asyncio.sleep(5)  # let the plugins reconnect first
+    await asyncio.sleep(UPDATE_FIRST_DELAY)
     while True:
-        latest = await check_for_update()
+        latest = os.environ.get("FIGMOSHA_FAKE_LATEST") or await check_for_update()
         if latest is not None:
             await set_update(latest)
         await asyncio.sleep(UPDATE_EVERY)
@@ -176,6 +183,14 @@ async def _stop_update_checks(app):
     task = app.get("update_task")
     if task:
         task.cancel()
+
+
+def install_update_checks(app):
+    """Check GitHub for releases while the app runs, unless turned off."""
+    if os.environ.get("FIGMOSHA_NO_UPDATE_CHECK"):
+        return
+    app.on_startup.append(_start_update_checks)
+    app.on_cleanup.append(_stop_update_checks)
 
 
 def _doc_key(conn_id):
@@ -420,6 +435,9 @@ async def plugin_ws_handler(request: web.Request):
                 await _send_update(ws)
                 await _broadcast_peers()
                 continue
+            if mtype in ("chat-load", "chat-send", "chat-stop") or mtype in chat.SETTINGS_TYPES:
+                await _chat_from_plugin(ws, conn_id, m)
+                continue
             if mtype == "pong":
                 # Answer to a liveness probe: this slot is defended, so a new
                 # connection for the same file will not take it over.
@@ -500,7 +518,7 @@ def resolve_target(target):
     """
     live = _live_plugins()
     if not live:
-        return None, "plugin not connected — open Figmosha Bridge in Figma"
+        return None, "plugin not connected — open Figmosha in Figma"
 
     if target is None or target == "":
         if len(live) == 1:
@@ -866,7 +884,7 @@ def _version_notice(info):
         parts.append(f"the plugin in «{info.get('name') or '?'}» runs an older build "
                      f"({info.get('pluginVersion') or 'unversioned'}, current "
                      f"{expected_plugin_version()}) — re-run it in Figma: "
-                     f"Plugins → Development → Figmosha Bridge")
+                     f"Plugins → Development → Figmosha")
     if UPDATE:
         parts.append(f"Figmosha {UPDATE['latest']} is released (this is {VERSION}) — "
                      f"git pull, then restart the bridge and re-run the plugin")
@@ -892,6 +910,9 @@ def _files_payload():
                          "for_s": int(time.time() - running["since"])} if running else None),
             "waiting": [w["agent"] or "?" for w in q.get("waiting", [])],
         }
+        chat_state = chat.status_of(i.get("docSig")) if i.get("docSig") else None
+        if chat_state is not None:
+            entry["chat"] = chat_state
         if i.get("docSig") is not None and key in seen:
             # Another tab/window on the same document. Harmless — flagged so the
             # count in `files` is not read as "two different files".
@@ -967,7 +988,7 @@ async def root_handler(request: web.Request) -> web.Response:
 
     return web.json_response({
         "service": "figmosha-bridge",
-        "version": "2.0",
+        "version": VERSION,
         "endpoints": {
             "POST /exec": ("{code, target?, timeout?, parallel?, force?} -> "
                            "{ok, result, value, logs, elapsed_ms}. Serialized per file "
@@ -976,8 +997,67 @@ async def root_handler(request: web.Request) -> web.Response:
             "GET /targets": "{files: [{name, fileKey, conn}]}",
             "POST /clear": "{target} -> drop a file's abandoned-script interlock after a 504",
             "WS /plugin": "Figma plugin connects here (one per open file)",
+            "GET /chat?doc=": ("a file's agent chat: {messages, busy, activity, session, commands, "
+                               "providers, settings, models}"),
+            "POST /chat/send": "{doc, text, images?, quote?, answer?, lang?} -> {ok, id}",
+            "POST /chat/stop": "{doc} -> interrupt the agent in that file's chat",
+            "GET /chat/settings": "{ok, providers, settings: {provider, model, effort}, models}",
+            "POST /chat/settings": "{provider?, model?, effort?} -> the same shape, or 400",
+            "POST /chat/recheck": "look for Claude Code and Codex again -> the same shape",
         },
     })
+
+
+def _chat_peers(doc):
+    """Plugin windows open on this document, for chat events: [(ws, file name)]."""
+    return [(i["ws"], i.get("name")) for _, i in _live_plugins() if i.get("docSig") == doc]
+
+
+def _chat_tabs():
+    """Every plugin window with a file id, for the chat settings: [(ws, docSig)]."""
+    return [(i["ws"], i["docSig"]) for _, i in _live_plugins() if chat.valid_doc(i.get("docSig"))]
+
+
+async def _chat_from_plugin(ws, conn_id, m):
+    """Chat requests over the plugin socket (the UI iframe has no CORS for fetch)."""
+    doc = (PLUGINS.get(conn_id) or {}).get("docSig")
+
+    async def refuse(error):
+        # The UI shows a toast and puts the text back: a send is never silently lost.
+        try:
+            await ws.send_str(json.dumps({"type": "chat", "doc": doc, "event": {
+                "kind": "refused", "error": error}}))
+        except Exception:
+            pass
+
+    if m["type"] in chat.SETTINGS_TYPES:
+        try:
+            await chat.from_plugin(ws, doc, m)
+        except Exception as e:
+            print(f"[chat] {m['type']} failed: {e!r}")
+        return
+    if not chat.valid_doc(doc):
+        if m["type"] == "chat-send":
+            await refuse("this window has no file id yet")
+        return
+    try:
+        if m["type"] == "chat-send":
+            status, out = await chat.send(doc, m)
+            if status != 200:
+                await refuse(out.get("error"))
+        elif m["type"] == "chat-stop":
+            await chat.stop(doc)
+        else:
+            st = chat.state(doc, m.get("lang"))
+            await ws.send_str(json.dumps({"type": "chat", "doc": doc, "event": {
+                "kind": "history", "messages": st["messages"], "busy": st["busy"],
+                "activity": st["activity"], "commands": st["commands"], "lang": st["lang"],
+                **{k: st[k] for k in ("providers", "settings", "models") if k in st}}},
+                ensure_ascii=False))
+    except Exception as e:   # a chat failure must not drop the plugin socket
+        print(f"[chat] {m['type']} failed: {e!r}")
+        if m["type"] == "chat-send":
+            await refuse(str(e))
 
 
 def build_app() -> web.Application:
@@ -988,6 +1068,7 @@ def build_app() -> web.Application:
     app.router.add_post("/exec", exec_handler)
     app.router.add_post("/clear", clear_handler)
     app.router.add_get("/plugin", plugin_ws_handler)
+    chat.setup(app, guard=_guard, peers=_chat_peers, tabs=_chat_tabs)
     return app
 
 
@@ -1031,9 +1112,7 @@ def main():
     loop = asyncio.new_event_loop()
     loop.set_exception_handler(_quiet_connection_resets)
     app = build_app()
-    if not os.environ.get("FIGMOSHA_NO_UPDATE_CHECK"):
-        app.on_startup.append(_start_update_checks)
-        app.on_cleanup.append(_stop_update_checks)
+    install_update_checks(app)
     web.run_app(app, host=hosts, port=args.port, print=None, loop=loop)
 
 

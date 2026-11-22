@@ -1,0 +1,4 @@
+#!/bin/sh
+# Bumps PLUGIN_VERSION when plugin/code.js or plugin/ui.html is in the commit.
+# Enable once per clone: git config core.hooksPath tools
+exec python3 "$(git rev-parse --show-toplevel)/tools/bump_plugin.py" --staged

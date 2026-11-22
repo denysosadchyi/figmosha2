@@ -20,3 +20,7 @@ CLAUDE.local.md
 
 # Local scratch scripts (client work — never committed)
 scratch/
+
+# jsdom for the chat UI tests
+node_modules/
+package-lock.json
