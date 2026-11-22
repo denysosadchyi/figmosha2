@@ -7,7 +7,7 @@ the canvas.
 Figmosha is a small Figma plugin and a small program on your computer. It uses
 your own Claude Code or Codex login. It adds no new account.
 
-<img width="380" alt="The Figmosha chat in Figma. Claude answers with a table of eight frames and their sizes, a short note under the table and two buttons, A and B, with next steps." src="docs/img/chat.png" />
+<img width="760" alt="The Figmosha chat in Figma. Claude answers with a table of eight frames and their sizes, a short note under the table and two buttons, A and B, with next steps." src="docs/img/chat.png" />
 
 ## What you can do
 
@@ -124,7 +124,7 @@ remembers its size and its place on the screen.
 
 ### Settings
 
-<img width="380" alt="The settings page with six rows, each with a dropdown: Interface scale 100%, Theme Light, Language English, Agent Claude Code, Model Opus, Effort Medium." src="docs/img/settings.png" />
+<img width="760" alt="The Figmosha settings page over the Figma canvas, with six rows, each with a dropdown: Interface scale 100%, Theme Light, Language English, Agent Claude Code, Model Opus, Effort Medium." src="docs/img/settings.png" />
 
 Click the gear icon next to the chat icon to open the settings.
 
@@ -140,11 +140,11 @@ Click the gear icon next to the chat icon to open the settings.
 
 The settings apply to all your files.
 
-<img width="380" alt="The same chat in the dark theme: the table of frames and the A and B buttons on a dark grey background." src="docs/img/dark.png" />
+<img width="760" alt="The same chat in the dark theme, over the light Figma canvas: the table of frames and the A and B buttons on a dark grey background." src="docs/img/dark.png" />
 
 ### Welcome screen
 
-<img width="380" alt="The welcome screen: an illustration of a frame and a chat bubble, the title Hi. This is Claude in Figma, five short tips and the message field at the bottom." src="docs/img/welcome.png" />
+<img width="760" alt="The Figmosha welcome screen over the Figma canvas: an illustration of a frame and a chat bubble, the title Hi. This is Claude in Figma, five short tips and the message field at the bottom." src="docs/img/welcome.png" />
 
 The first time you open the plugin in a file, you see a welcome screen. It
 shows what the agent can do in this file. Type your first request in the
