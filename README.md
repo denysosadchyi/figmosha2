@@ -140,7 +140,7 @@ Click the gear icon next to the chat icon to open the settings.
 
 The settings apply to all your files.
 
-<img width="760" alt="The same chat in the dark theme, over the light Figma canvas: the table of frames and the A and B buttons on a dark grey background." src="docs/img/dark.png" />
+<img width="760" alt="The chat in the dark theme, with Figma also in its dark theme: a table of frames, a short note and two buttons, A and B." src="docs/img/dark.png" />
 
 ### Welcome screen
 
