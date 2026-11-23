@@ -7,7 +7,7 @@ figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha", themeColors:
 // disk and asks for a re-Run when they differ, because a running plugin keeps
 // the code it started with. Bump it on every change to plugin/ —
 // python3 tools/bump_plugin.py does it (or the tools/pre-commit hook).
-const PLUGIN_VERSION = "2026-11-23.3";
+const PLUGIN_VERSION = "2026-11-23.4";
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
