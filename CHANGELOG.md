@@ -10,6 +10,27 @@ code it started with, so new helpers won't exist until you do. If
 
 ## [Unreleased]
 
+## [2.4.1] — 2026-11-23
+
+### Fixed
+
+- **The chat language now changes the reply language too.** Before, after a
+  language change the agent kept answering in the language of the old talk.
+  Now the first message after the change tells the agent the new language,
+  once. This works for Claude Code and Codex, and after a bridge restart.
+  Slash commands do not use up this note. A new chat without agent replies
+  does not need it.
+- **Resizing the chat from the left or top edge keeps the opposite side in
+  place.** Before, a drag on the left edge moved the right edge. In an older
+  Figma without window position support, the window only resizes.
+- **The message field fits its text after a window resize.** Before, after the
+  window was narrow once, the empty field could stay tall.
+
+### Changed
+
+- The working animation is calmer. The three typing dots are gone, and the
+  light under the message field moves slower and softer.
+
 ## [2.4.0] — 2026-11-22
 
 ### Added
@@ -104,6 +125,7 @@ code it started with, so new helpers won't exist until you do. If
 - After `/clear` the note names the agent that is active. Before, it always
   said Claude, also with Codex.
 
+[2.4.1]: https://github.com/denysosadchyi/figmosha2/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/denysosadchyi/figmosha2/compare/v2.3.0...v2.4.0
 
 ## [2.3.0] — 2026-10-06

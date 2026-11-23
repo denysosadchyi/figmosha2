@@ -100,7 +100,7 @@ def bridge_outdated() -> bool:
 # Releasing (see AGENTS.md → Releasing): bump VERSION here, move CHANGELOG's
 # "Unreleased" under the new version, tag vX.Y.Z and push the tag.
 
-VERSION = "2.4.0"
+VERSION = "2.4.1"
 REPO = "denysosadchyi/figmosha2"
 UPDATE_EVERY = 6 * 60 * 60   # seconds between checks
 UPDATE_FIRST_DELAY = 5       # seconds: let the plugins reconnect first
