@@ -399,7 +399,14 @@ the user — don't keep working against old code.
 is newer than its `VERSION`, `/status` has `update: {latest, current, url}`, `/exec` replies carry a
 `notice`, the plugin bar shows "New version X.Y.Z" with an Update button (opens the release notes), and
 `doctor` prints a `!` line. Mention it to the user once; updating is `git pull`, restart the bridge,
-re-run the plugin. Off with `FIGMOSHA_NO_UPDATE_CHECK=1`. In chat mode the same offer (or the re-run
+re-run the plugin. Off with `FIGMOSHA_NO_UPDATE_CHECK=1`.
+In a clean `git clone` on master the bridge installs the release itself, so there is no offer.
+It fetches the tag `vX.Y.Z` and fast forwards master. It runs pip when `requirements.txt` changed.
+Then it waits until no exec, queue holder or chat runs, and restarts itself on the same command line.
+`/status` shows `auto_update: {version, state}`, and the state is installing, installed or failed.
+A failed install is tried again at the next check. When plugin files changed, the chat asks for one
+re-run of the plugin. A clone with edits in tracked files, or on another branch, is never touched and
+keeps the offer above. `FIGMOSHA_NO_AUTO_UPDATE=1` turns the install off and keeps the offer. In chat mode the same offer (or the re-run
 request) is a card at the end of the chat with Оновити / Пропустити; a skip lasts for that version only.
 To see it without a real release, start the bridge with `FIGMOSHA_FAKE_LATEST=9.9.9` (shown ~5 s later).
 

@@ -29,6 +29,20 @@ code it started with, so new helpers won't exist until you do. If
 - `h.notes()`, `h.note()`, `h.noteDone()`, `h.noteClear()` and `figmosha notes`,
   so an agent in a terminal can read and close the same tasks.
 
+## [2.6.0] — 2026-11-23
+
+### Changed
+
+- **Figmosha updates itself.** The bridge installs a new release in the
+  background, when it was installed with git clone. It fetches the release,
+  installs new requirements and restarts when no task runs. If the
+  requirements fail to install, it stays on the old version and tries again
+  later. There is no
+  Update button and no page to open. When the plugin changed, the chat asks
+  for one restart of the plugin. A copy with local edits, or on another
+  branch, is never changed and still gets the offer. Set
+  FIGMOSHA_NO_AUTO_UPDATE=1 to turn the install off.
+
 ## [2.5.1] — 2026-11-23
 
 ### Changed

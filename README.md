@@ -200,17 +200,12 @@ once. You can change each choice later in the settings.
 
 ## How to update
 
-When a new version is out, the bar shows **New version** and an **Update**
-button. In the chat, a card at the end of the chat shows the same news.
-**Update** opens the list of changes. **Skip** hides the card for this version.
+Figmosha updates itself in the background. It checks for a new version every
+6 hours. It installs the new version and restarts by itself, when no task runs.
 
-To install the new version:
-
-1. Ask your agent: "Update Figmosha". Or type `git pull` in a terminal in the
-   Figmosha folder.
-2. Restart Figmosha: `bash start-bridge.sh` on macOS or Linux,
-   `.\start-bridge.ps1 -Restart` on Windows.
-3. In Figma, run the plugin again (**⌘⌥P** or **Ctrl+Alt+P**).
+When the plugin changed too, the chat asks you to restart the plugin one time.
+Click **Restart** on the card in the chat, or run the plugin again
+(**⌘⌥P** or **Ctrl+Alt+P**). There is nothing else to do.
 
 If the plugin menu still shows an old name, import `plugin/manifest.json`
 again, as in [Install](#install) step 3.
