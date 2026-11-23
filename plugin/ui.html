@@ -119,10 +119,10 @@
   html.settings-open #chat { display:none !important; }
   .shead { display:flex; align-items:center; gap:4px; margin-bottom:8px; }
   .shead h2 { margin:0; font-size:14px; font-weight:600; }
-  #sBack { flex:none; width:32px; height:32px; padding:0; border:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; background:transparent; color:var(--muted); cursor:pointer; }
-  #sBack:hover { color:var(--text); background:var(--hover); }
-  #sBack svg { width:18px; height:18px; }
-  #sBack:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  #sBack, #nBack { flex:none; width:32px; height:32px; padding:0; border:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; background:transparent; color:var(--muted); cursor:pointer; }
+  #sBack:hover, #nBack:hover { color:var(--text); background:var(--hover); }
+  #sBack svg, #nBack svg { width:18px; height:18px; }
+  #sBack:focus-visible, #nBack:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   /* One row per setting: the label left, a dropdown right. No cards: a plain list on the page,
      split by a 1px line. The line is the top border of every shown row after the first shown one,
      so a hidden row never doubles it. */
@@ -139,6 +139,44 @@
   .dd select:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
   .dd select option { background:var(--surface); color:var(--text); }
   .dd select option:disabled { color:var(--faint); }
+  /* Notes: tasks pinned to nodes as Figma annotations (docs/CHAT.md, Notes).
+     The icon sits next to the settings icon; the page replaces the chat while open. */
+  #notebtn { display:none; flex:none; width:22px; height:22px; padding:0; border:0; border-radius:50%;
+             align-items:center; justify-content:center; background:transparent; color:var(--muted); cursor:pointer; }
+  html.has-notes body.chatmode #notebtn { display:inline-flex; }
+  html:not(.has-notes) #cPin { display:none; }
+  #notebtn svg { width:16px; height:16px; }
+  #notebtn:hover { background:var(--hover); color:var(--text); }
+  #notebtn:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  html.notes-open #notebtn { background:var(--accent-soft); color:var(--accent); }
+  html.notes-open body.chatmode #chatbtn { background:transparent; color:var(--muted); }
+  #notes { display:none; flex:1; min-height:0; flex-direction:column; padding:8px 12px 16px; overflow-y:auto; font-size:13px; color:var(--text); background:var(--surface); }
+  html.notes-open body.chatmode #notes { display:flex; }
+  html.notes-open #chat { display:none !important; }
+  html.welcome-open #notes, html.onboard-open #notes { display:none !important; }
+  #notes .shead h2 { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #nRunAll { flex:none; height:28px; padding:0 12px; border:0; border-radius:999px; background:var(--accent-soft); color:var(--accent); font:inherit; font-size:12px; font-weight:600; cursor:pointer; }
+  #nRunAll:hover { background:var(--accent-soft-hover); }
+  #nRunAll:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  #nRunAll[hidden] { display:none; }
+  .nrow { display:flex; align-items:flex-start; gap:2px; padding:6px 0; }
+  .nrow ~ .nrow { border-top-width:1px; border-top-style:solid; border-top-color:var(--line); }
+  .nmain { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; padding:4px 6px; border:0; border-radius:var(--r-sm); background:transparent; color:var(--text); font:inherit; text-align:left; cursor:pointer; }
+  .nmain:hover { background:var(--hover); }
+  .nmain:focus-visible, .nact:focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
+  .nname { display:flex; align-items:center; gap:6px; min-width:0; font-size:12px; font-weight:500; color:var(--muted); }
+  .nname i { flex:none; width:6px; height:6px; border-radius:50%; background:var(--accent); }
+  .nname b { min-width:0; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .nrow.done .nname i { background:var(--ok); }
+  .nrow.done .nname em { flex:none; font-style:normal; color:var(--ok); }
+  .ntext { line-height:1.4; white-space:pre-wrap; overflow-wrap:anywhere; }
+  .nrow.done .ntext { color:var(--muted); }
+  .nreply { font-size:12px; line-height:1.4; color:var(--muted); white-space:pre-wrap; overflow-wrap:anywhere; }
+  .nact { flex:none; width:28px; height:28px; margin-top:2px; padding:0; border:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; background:transparent; color:var(--muted); cursor:pointer; }
+  .nact svg { width:16px; height:16px; }
+  .nact:hover { background:var(--hover); color:var(--text); }
+  .nact[data-n=run]:hover { background:var(--accent-soft); color:var(--accent); }
+  .nempty { margin:auto 8px; text-align:center; color:var(--muted); line-height:1.5; }
   /* no agent on the bridge computer: this card stands where the composer would be */
   #cNoAgent { display:none; position:relative; z-index:2; margin:0 8px 8px; flex-direction:column; gap:8px; padding:12px; border-radius:var(--r-lg); background:var(--raised); box-shadow:var(--compose-shadow); font-size:12px; line-height:1.4; color:var(--text); }
   #cNoAgent h3 { margin:0; font-size:13px; font-weight:600; }
@@ -408,8 +446,8 @@
   .rz[data-edge=se] { bottom:0; right:0; cursor:nwse-resize; }
   /* Overlay scrollbar (see docs/CHAT.md, Scrollbars): the native bar is hidden, so the content
      keeps its full width. JS puts a rail next to each area; only the thumb takes the pointer. */
-  .msgs, #settings, #welcome { scrollbar-width:none; }
-  .msgs::-webkit-scrollbar, #settings::-webkit-scrollbar, #welcome::-webkit-scrollbar { display:none; }
+  .msgs, #settings, #welcome, #notes { scrollbar-width:none; }
+  .msgs::-webkit-scrollbar, #settings::-webkit-scrollbar, #welcome::-webkit-scrollbar, #notes::-webkit-scrollbar { display:none; }
   .sbar { position:absolute; z-index:5; right:4px; width:6px; pointer-events:none; opacity:0; transition:opacity .3s; }
   .sbar.on { opacity:1; transition-duration:.12s; }
   .sbar-thumb { position:absolute; top:0; right:0; width:3px; border-radius:999px; background:color-mix(in srgb, var(--faint) 50%, transparent); pointer-events:auto; transition:width .12s, background-color .12s; }
@@ -427,6 +465,7 @@
   <span id="badge"><span id="peers"></span><span id="icon" role="img"></span></span>
   <button id="update" type="button">Update</button>
   <div id="barActions">
+    <button id="notebtn" type="button" title="Задачі на макеті" aria-label="Задачі на макеті"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="6"/><path stroke-linecap="round" stroke-linejoin="round" d="m8 12.5l2.7 2.5L16 9.5"/></g></svg></button>
     <button id="setbtn" type="button" title="Налаштування" aria-label="Налаштування"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M13.765 2.152C13.398 2 12.932 2 12 2s-1.398 0-1.765.152a2 2 0 0 0-1.083 1.083c-.092.223-.129.484-.143.863a1.62 1.62 0 0 1-.79 1.353a1.62 1.62 0 0 1-1.567.008c-.336-.178-.579-.276-.82-.308a2 2 0 0 0-1.478.396C4.04 5.79 3.806 6.193 3.34 7s-.7 1.21-.751 1.605a2 2 0 0 0 .396 1.479c.148.192.355.353.676.555c.473.297.777.803.777 1.361s-.304 1.064-.777 1.36c-.321.203-.529.364-.676.556a2 2 0 0 0-.396 1.479c.052.394.285.798.75 1.605c.467.807.7 1.21 1.015 1.453a2 2 0 0 0 1.479.396c.24-.032.483-.13.819-.308a1.62 1.62 0 0 1 1.567.008c.483.28.77.795.79 1.353c.014.38.05.64.143.863a2 2 0 0 0 1.083 1.083C10.602 22 11.068 22 12 22s1.398 0 1.765-.152a2 2 0 0 0 1.083-1.083c.092-.223.129-.483.143-.863c.02-.558.307-1.074.79-1.353a1.62 1.62 0 0 1 1.567-.008c.336.178.579.276.819.308a2 2 0 0 0 1.479-.396c.315-.242.548-.646 1.014-1.453s.7-1.21.751-1.605a2 2 0 0 0-.396-1.479c-.148-.192-.355-.353-.676-.555A1.62 1.62 0 0 1 19.562 12c0-.558.304-1.064.777-1.36c.321-.203.529-.364.676-.556a2 2 0 0 0 .396-1.479c-.052-.394-.285-.798-.75-1.605c-.467-.807-.7-1.21-1.015-1.453a2 2 0 0 0-1.479-.396c-.24.032-.483.13-.82.308a1.62 1.62 0 0 1-1.566-.008a1.62 1.62 0 0 1-.79-1.353c-.014-.38-.05-.64-.143-.863a2 2 0 0 0-1.083-1.083Z"/></g></svg></button>
     <button id="chatbtn" type="button" title="Чат з Claude" aria-label="Чат з Claude"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2S2 6.477 2 12c0 1.6.376 3.112 1.043 4.453c.178.356.237.763.134 1.148l-.595 2.226a1.3 1.3 0 0 0 1.591 1.592l2.226-.596a1.63 1.63 0 0 1 1.149.133A9.96 9.96 0 0 0 12 22Z"/><path stroke-linecap="round" d="M8 10.5h8M8 14h5.5"/></g></svg><i></i></button>
   </div>
@@ -446,6 +485,7 @@
       <div class="field">
         <button class="clip" id="cClip" type="button" title="Прикріпити фото" aria-label="Прикріпити фото"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M7.9175 17.8068L15.8084 10.2535C16.7558 9.34668 16.7558 7.87637 15.8084 6.96951C14.861 6.06265 13.325 6.06265 12.3776 6.96951L4.54387 14.4681C2.74382 16.1911 2.74382 18.9847 4.54387 20.7077C6.34391 22.4308 9.26237 22.4308 11.0624 20.7077L19.0105 13.0997C21.6632 10.5605 21.6632 6.44362 19.0105 3.90441C16.3578 1.3652 12.0569 1.3652 9.40419 3.90441L3 10.0346"/></svg></button>
         <input type="file" id="cFile" accept="image/*" multiple hidden>
+        <button class="clip" id="cPin" type="button" title="Закріпити як задачу на виділеному шарі" aria-label="Закріпити як задачу на виділеному шарі"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2"><path stroke-linejoin="round" d="M12 21.5c-1.2 0-7-5.6-7-11a7 7 0 1 1 14 0c0 5.4-5.8 11-7 11Z"/><circle cx="12" cy="10.5" r="2.5"/></g></svg></button>
         <textarea id="cInput" rows="1" placeholder="Напиши, що зробити в цьому файлі" aria-label="Повідомлення" aria-controls="cCmds" aria-expanded="false" aria-autocomplete="list"></textarea>
         <button class="send" id="cSend" type="submit" aria-label="Надіслати" title="Надіслати"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none"><path stroke="currentColor" stroke-width="2" d="m18.636 15.67l1.716-5.15c1.5-4.498 2.25-6.747 1.062-7.934s-3.436-.438-7.935 1.062L8.33 5.364C4.7 6.574 2.885 7.18 2.37 8.067a2.72 2.72 0 0 0 0 2.73c.515.888 2.33 1.493 5.96 2.704c.584.194.875.291 1.119.454c.236.158.439.361.597.597c.163.244.26.535.454 1.118c1.21 3.63 1.816 5.446 2.703 5.962a2.72 2.72 0 0 0 2.731 0c.887-.516 1.492-2.331 2.703-5.962Z"/><path fill="currentColor" d="M16.212 8.848a.75.75 0 0 0-1.055-1.066zm-5.55 5.488l5.55-5.488l-1.055-1.066l-5.55 5.488z"/></g></svg></button>
       </div>
@@ -483,6 +523,13 @@
         <option value="en" lang="en">English</option>
       </select></span>
     </div>
+    <div class="srow" id="sNotesRow" hidden>
+      <h3 id="sNotesH">Задачі на макеті</h3>
+      <span class="dd"><select id="sNotes" aria-labelledby="sNotesH">
+        <option value="on">Увімкнено</option>
+        <option value="off">Вимкнено</option>
+      </select></span>
+    </div>
     <div class="srow">
       <h3 id="sAgentH">Агент</h3>
       <span class="dd"><select id="sAgent" aria-labelledby="sAgentH"></select></span>
@@ -495,6 +542,14 @@
       <h3 id="sEffortH">Зусилля</h3>
       <span class="dd"><select id="sEffort" aria-labelledby="sEffortH"></select></span>
     </div>
+  </section>
+  <section id="notes" aria-label="Задачі на макеті">
+    <div class="shead">
+      <button id="nBack" type="button" title="Назад до чату" aria-label="Назад до чату"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m15 5l-6 7l6 7"/></svg></button>
+      <h2>Задачі на макеті</h2>
+      <button id="nRunAll" type="button" hidden>Виконати всі</button>
+    </div>
+    <div id="nList"></div>
   </section>
 
 <div class="rz" data-edge="n"></div><div class="rz" data-edge="s"></div><div class="rz" data-edge="e"></div><div class="rz" data-edge="w"></div>
@@ -618,6 +673,20 @@ var ChatCore = (function () {
     }).sort(rank);
     return pre.concat(sub);
   }
+  // The chat message that asks the agent to do pinned notes (docs/CHAT.md, Notes).
+  // items: [{id, i, name, text}] from h.notes(). It names h.noteDone, so a session
+  // that started before the notes existed can still mark them.
+  function notePrompt(items, lang) {
+    var en = lang === "en", one = items.length === 1;
+    var head = en ? (one ? "Do the task from a Figmosha note." : "Do the tasks from the Figmosha notes, one by one.")
+                  : (one ? "Виконай задачу з нотатки Figmosha." : "Виконай задачі з нотаток Figmosha, по одній.");
+    var rows = items.map(function (n, k) {
+      return (one ? "" : (k + 1) + ". ") + "«" + n.name + "» (id " + n.id + ", note " + n.i + "): " + String(n.text == null ? "" : n.text).trim();
+    });
+    var tail = en ? 'After each task mark its note: await h.noteDone("<id>", "<what you did>", <note>).'
+                  : 'Після кожної задачі познач нотатку: await h.noteDone("<id>", "<що зроблено>", <note>).';
+    return head + "\n\n" + rows.join("\n") + "\n\n" + tail;
+  }
   function initialState() { return { messages: [], busy: false, activity: [], stream: "", commands: [] }; }
   function copy(s, patch) { var o = {}, k; for (k in s) o[k] = s[k]; for (k in patch) o[k] = patch[k]; return o; }
   function reduce(s, e) {
@@ -646,7 +715,7 @@ var ChatCore = (function () {
     }
   }
   return { esc: esc, renderText: renderText, actionLetter: actionLetter, initialState: initialState, reduce: reduce,
-           matchCommands: matchCommands, commandHint: commandHint, FALLBACK_COMMANDS: FALLBACK_COMMANDS,
+           matchCommands: matchCommands, commandHint: commandHint, notePrompt: notePrompt, FALLBACK_COMMANDS: FALLBACK_COMMANDS,
            HINTS: HINTS, HINTS_EN: HINTS_EN };
 })();
 </script>
@@ -673,7 +742,7 @@ const I18N = {
     settings: "Налаштування", chatWith: "Чат з Claude", commands: "Команди Claude", stop: "Перервати завдання",
     unquote: "Прибрати цитату", attach: "Прикріпити фото", placeholder: "Напиши, що зробити в цьому файлі",
     message: "Повідомлення", send: "Надіслати", back: "Назад до чату", scale: "Масштаб інтерфейсу",
-    theme: "Тема", themeSystem: "Як у Figma", themeLight: "Світла", themeDark: "Темна", lang: "Мова",
+    theme: "Тема", themeSystem: "Як у Figma", themeLight: "Світла", themeDark: "Темна", noteOn: "Увімкнено", noteOff: "Вимкнено", lang: "Мова",
     you: "Ти", system: "Система", photo: "Фото",
     noBridge: "Немає зв'язку з мостом", notSent: "Не вийшло надіслати", noPhoto: "Не вийшло відкрити фото",
     notStopped: "Не вийшло зупинити", gone: "Цього повідомлення вже немає",
@@ -690,6 +759,11 @@ const I18N = {
     naTitle: "Потрібен агент",
     naText: "Чат працює з Claude Code або Codex. Встанови один із них на комп'ютері з мостом.",
     naLogin: "Потім увійди в нього в терміналі.", naCheck: "Перевірити ще раз", naNone: "Агента ще не знайдено.",
+    notes: "Задачі на макеті", notePin: "Закріпити як задачу на виділеному шарі", noteRunAll: "Виконати всі",
+    noteRun: "Виконати задачу", noteRm: "Прибрати задачу", noteGo: "Показати шар у Figma", noteDone: "готово",
+    noteEmpty: "Задач ще немає. Виділи шар у Figma, напиши в чаті, що зробити, і натисни кнопку з міткою біля поля. Задача зʼявиться на макеті як анотація.",
+    noteNoText: "Спершу напиши задачу", noteNoSel: "Виділи шар у Figma", noteBadSel: "На цей шар не можна. Виділи фрейм",
+    notePinned: "Задачу закріплено", noteGone: "Цього шару вже немає", noteFail: "Не вийшло зберегти задачу",
   },
   en: {
     connecting: "Connecting…", connected: "connected", error: "Error", reconnecting: "Reconnecting…",
@@ -701,7 +775,7 @@ const I18N = {
     settings: "Settings", chatWith: "Chat with Claude", commands: "Claude commands", stop: "Stop the task",
     unquote: "Remove the quote", attach: "Attach a photo", placeholder: "Tell Claude what to do in this file",
     message: "Message", send: "Send", back: "Back to the chat", scale: "Interface scale",
-    theme: "Theme", themeSystem: "Like Figma", themeLight: "Light", themeDark: "Dark", lang: "Language",
+    theme: "Theme", themeSystem: "Like Figma", themeLight: "Light", themeDark: "Dark", noteOn: "On", noteOff: "Off", lang: "Language",
     you: "You", system: "System", photo: "Photo",
     noBridge: "No link to the bridge", notSent: "Could not send", noPhoto: "Could not open the photo",
     notStopped: "Could not stop", gone: "This message is gone",
@@ -718,6 +792,11 @@ const I18N = {
     naTitle: "An agent is needed",
     naText: "The chat works with Claude Code or Codex. Install one of them on the bridge computer.",
     naLogin: "Then log in to it in a terminal.", naCheck: "Check again", naNone: "No agent found yet.",
+    notes: "Tasks on the canvas", notePin: "Pin as a task to the selected layer", noteRunAll: "Do all",
+    noteRun: "Do the task", noteRm: "Remove the task", noteGo: "Show the layer in Figma", noteDone: "done",
+    noteEmpty: "No tasks yet. Select a layer in Figma, write in the chat what to do, and press the pin button next to the field. The task shows on the canvas as an annotation.",
+    noteNoText: "Write the task first", noteNoSel: "Select a layer in Figma", noteBadSel: "Not on this layer. Select a frame",
+    notePinned: "The task is pinned", noteGone: "This layer is gone", noteFail: "Could not save the task",
   },
 };
 let uiLang = "uk";
@@ -736,8 +815,11 @@ const I18N_DOM = [
   ["#cSend", "title aria-label", "send"], ["#settings", "aria-label", "settings"], ["#sBack", "title aria-label", "back"],
   ["#settings h2", "text", "settings"], ["#sScaleH", "text", "scale"], ["#sThemeH", "text", "theme"],
   ['#sTheme option[value="system"]', "text", "themeSystem"], ['#sTheme option[value="light"]', "text", "themeLight"],
+  ["#sNotesH", "text", "notes"], ['#sNotes option[value="on"]', "text", "noteOn"], ['#sNotes option[value="off"]', "text", "noteOff"],
   ['#sTheme option[value="dark"]', "text", "themeDark"], ["#sLangH", "text", "lang"],
   ["#sAgentH", "text", "agent"], ["#sModelH", "text", "model"], ["#sEffortH", "text", "effort"],
+  ["#notebtn", "title aria-label", "notes"], ["#cPin", "title aria-label", "notePin"], ["#notes", "aria-label", "notes"],
+  ["#notes h2", "text", "notes"], ["#nBack", "title aria-label", "back"], ["#nRunAll", "text", "noteRunAll"],
 ];
 // Parts built from code re-render here on a language switch.
 const LANG_HOOKS = [];
@@ -955,15 +1037,19 @@ window.onmessage = (e) => {
     identity = { fileKey: m.fileKey || null, name: m.name || null, docSig: m.docSig || null,
                  pluginVersion: m.pluginVersion || null };
     log(`[id] file=${identity.name}`);
+    setNotesHere(m.notes === true);  // no annotations in this Figma: no tasks, no pin button
     // Show which file this window is bound to, once the socket is up.
     if (ws && ws.readyState === WebSocket.OPEN && identity.name) setStatus(identity.name, "ok");
     sendHello();  // (re-)register this connection under the file name
     return;
   }
   if (m.type === "ui-mode") { setMode(m.mode); return; }  // code.js resized the window
+  if (m.type === "notes-setting") { setNotesWanted(m.on !== false, false); return; }  // the stored choice, on start
   if (m.type === "settings") { applySettings(m); return; }  // stored scale and theme, on start
   if (m.type === "onboarding") { showOnboard(m.show === true); return; }  // first run of this user
   if (m.type === "welcome") { showWelcome(m.show === true); return; }  // first run in this file
+  if (m.type === "notes") { notesEvent(m); return; }           // the list of pinned tasks
+  if (m.type === "note-error") { noteError(m); return; }
   if (m.type === "notice-skips") { skips = { update: m.update || null, rerun: m.rerun || null }; render(); renderChat(); return; }
   if (m.type === "result" || m.type === "error") {
     if (m.type === "error") flashError();
@@ -1057,6 +1143,7 @@ function chatEvent(ev) {
   }
   if (chat.busy && !was.busy) { busySince = ev.kind === "history" && chat.activity.length ? chat.activity[0].t * 1000 : Date.now(); }
   if (!chat.busy || ev.kind === "history") stopping = false;  // fresh history: a stop may not have arrived
+  if (was.busy && !chat.busy && notesOpen()) notesAsk();      // the agent may have marked notes as done
   if (ev.kind === "message" && ev.message.from !== "me" && uiMode !== "chat") unread = true;
   render();
   renderChat();
@@ -1228,7 +1315,7 @@ function rowHtml(m, last, ans) {
 let chatStick = true, autoTop = 0;
 // The settings page hides the list. A hidden list has no height, so it can not follow or
 // measure anything: the browser drops its scroll position to 0. chatShown() guards that.
-const chatShown = () => !rootEl.classList.contains("settings-open");
+const chatShown = () => !rootEl.classList.contains("settings-open") && !rootEl.classList.contains("notes-open");
 function stickBottom() { if (!chatShown()) return; cMsgs.scrollTop = cMsgs.scrollHeight; autoTop = cMsgs.scrollTop; }
 cMsgs.addEventListener("scroll", () => {
   if (!chatShown()) return;
@@ -1290,7 +1377,7 @@ setInterval(() => { if (chat.busy && uiMode === "chat") renderChat(); }, 1000);
 
 function setMode(mode) {
   uiMode = mode === "chat" ? "chat" : "bar";
-  if (uiMode !== "chat") openSettings(false);
+  if (uiMode !== "chat") { openSettings(false); openNotes(false); }
   if (uiMode === "chat") unread = false;
   render();
   if (uiMode === "chat") { cMsgs._seen = false; cMsgs._html = ""; renderChat(); (onboardOn ? $c("onNext") : cInput).focus(); }
@@ -1459,7 +1546,8 @@ function saveSettings(patch) {
 let chatTop = 0;
 function openSettings(on) {
   const was = rootEl.classList.contains("settings-open");
-  if (on && !was) chatTop = cMsgs.scrollTop;
+  if (on && !was && chatShown()) chatTop = cMsgs.scrollTop;
+  if (on && notesOpen()) { rootEl.classList.remove("notes-open"); notesClosed(); }  // one page at a time
   rootEl.classList.toggle("settings-open", on);
   if (on || !was) return;
   if (chatStick) stickBottom(); else cMsgs.scrollTop = chatTop;
@@ -1477,6 +1565,7 @@ const PAGE_KEY = { sScale: "scale", sTheme: "theme", sLang: "lang" };
 const AGENT_KEY = { sAgent: "provider", sModel: "model", sEffort: "effort" };
 $c("settings").addEventListener("change", (e) => {
   const sel = e.target, pk = sel && PAGE_KEY[sel.id];
+  if (sel && sel.id === "sNotes") { setNotesWanted(sel.value === "on", true); return; }
   if (pk) { saveSettings({ [pk]: pk === "scale" ? +sel.value : sel.value }); return; }
   const k = sel && AGENT_KEY[sel.id];
   if (!k) return;
@@ -1484,6 +1573,92 @@ $c("settings").addEventListener("change", (e) => {
   if (!o || o.disabled) { renderAgent(); return; }   // not a real choice: show the settings again
   agentSend({ [k]: o.value });
 });
+// ─── Notes: tasks pinned to nodes as Figma annotations (docs/CHAT.md, Notes) ──
+// code.js holds the notes (they live in the file); this page only shows them.
+// The pin button next to the field turns the typed text into a note on the
+// selected layer. Do sends the note to the chat as a message, so the agent
+// works on it like on any other request and the chat queue keeps the order.
+let notes = { items: [], loaded: false };
+let pinText = null;   // the text the pin button sent: cleared from the field once it is pinned
+const PLAY_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linejoin="round" stroke-width="2" d="M7 5.5v13a1 1 0 0 0 1.5.86l11-6.5a1 1 0 0 0 0-1.72l-11-6.5A1 1 0 0 0 7 5.5Z"/></svg>';
+const notesOpen = () => rootEl.classList.contains("notes-open");
+// Two switches: the file can hold notes (code.js says so in identity), and the
+// user wants them (the settings page; code.js stores the choice).
+let notesHere = false, notesWanted = true;
+function syncNotes() {
+  const on = notesHere && notesWanted;
+  rootEl.classList.toggle("has-notes", on);
+  $c("sNotesRow").hidden = !notesHere;
+  $c("sNotes").value = notesWanted ? "on" : "off";
+  if (!on && notesOpen()) openNotes(false);
+}
+function setNotesHere(on) { notesHere = on; syncNotes(); }
+function setNotesWanted(on, send) {
+  notesWanted = on;
+  syncNotes();
+  if (send) parent.postMessage({ pluginMessage: { type: "notes-setting", on } }, "*");
+}
+function notesClosed() { parent.postMessage({ pluginMessage: { type: "notes-close" } }, "*"); }  // code.js stops following the canvas
+function notesAsk() { parent.postMessage({ pluginMessage: { type: "notes-load" } }, "*"); }
+function renderNotes() {
+  const todo = notes.items.filter((n) => !n.done);
+  $c("nRunAll").hidden = !todo.length;
+  const box = $c("nList");
+  let html = "";
+  if (notes.loaded && !notes.items.length) html = `<div class="nempty">${t("noteEmpty")}</div>`;
+  else html = notes.items.map((n, k) => `<div class="nrow${n.done ? " done" : ""}" data-k="${k}">`
+    + `<button type="button" class="nmain" data-n="go" title="${C.esc(t("noteGo"))}">`
+    + `<span class="nname"><i></i><b>${C.esc(n.name)}</b>${n.done ? `<em>${C.esc(t("noteDone"))}</em>` : ""}</span>`
+    + `<span class="ntext">${C.esc(n.text)}</span>${n.reply ? `<span class="nreply">${C.esc(n.reply)}</span>` : ""}</button>`
+    + (n.done ? "" : `<button type="button" class="nact" data-n="run" title="${C.esc(t("noteRun"))}" aria-label="${C.esc(t("noteRun"))}">${PLAY_SVG}</button>`)
+    + `<button type="button" class="nact" data-n="rm" title="${C.esc(t("noteRm"))}" aria-label="${C.esc(t("noteRm"))}">${XS}</button></div>`).join("");
+  if (box._html !== html) { box.innerHTML = html; box._html = html; }
+}
+function notesEvent(m) {
+  if (m.error === "noapi") { setNotesHere(false); return; }
+  notes = { items: Array.isArray(m.items) ? m.items : [], loaded: true };
+  renderNotes();
+  if (!m.added) return;
+  if (pinText !== null && cInput.value.trim() === pinText) { cInput.value = ""; grow(cInput); renderCmds(); }
+  pinText = null;
+  toast(t("notePinned"));
+}
+function noteError(m) {
+  pinText = null;
+  toast(t(m.code === "nosel" ? "noteNoSel" : m.code === "unsupported" ? "noteBadSel" : m.code === "gone" ? "noteGone" : "noteFail"));
+}
+function openNotes(on) {
+  const was = notesOpen();
+  if (on && !was && chatShown()) chatTop = cMsgs.scrollTop;
+  if (on) rootEl.classList.remove("settings-open");  // one page at a time
+  rootEl.classList.toggle("notes-open", on);
+  if (on) { renderNotes(); notesAsk(); return; }
+  if (!was) return;
+  notesClosed();
+  if (chatStick) stickBottom(); else cMsgs.scrollTop = chatTop;
+}
+function runNotes(list) {
+  if (!list.length || !chatSend({ text: C.notePrompt(list, uiLang) })) return;
+  cMsgs._seen = false;  // jump to the bottom when the message lands
+  openNotes(false);
+  cInput.focus();
+}
+$c("notebtn").onclick = () => { if (onboardOn) finishOnboard(); if (welcomeOn) closeWelcome(); openNotes(!notesOpen()); };
+$c("nBack").onclick = () => { openNotes(false); cInput.focus(); };
+$c("nRunAll").onclick = () => runNotes(notes.items.filter((n) => !n.done));
+$c("nList").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-n]"), row = b && b.closest(".nrow"), n = row && notes.items[+row.dataset.k];
+  if (!n) return;
+  if (b.dataset.n === "run") runNotes([n]);
+  else parent.postMessage({ pluginMessage: { type: b.dataset.n === "rm" ? "note-remove" : "note-focus", id: n.id, i: n.i, text: n.text } }, "*");
+});
+$c("cPin").onclick = () => {
+  const text = cInput.value.trim();
+  if (!text) { toast(t("noteNoText")); cInput.focus(); return; }
+  pinText = text;
+  parent.postMessage({ pluginMessage: { type: "note-add", text } }, "*");
+};
+LANG_HOOKS.push(renderNotes);
 // Window resize by the edge and corner zones. The UI sends the new size at
 // scale 1 with the dragged edge, at most once per frame, and done once at the end.
 // code.js clamps it, resizes the window and stores the size. A left or top edge
@@ -1604,7 +1779,7 @@ function overlayBar(area) {
   if (typeof MutationObserver === "function") new MutationObserver(queue).observe(area, { childList: true, subtree: true, characterData: true });
   update();
 }
-["cMsgs", "settings", "welcome"].forEach((id) => overlayBar($c(id)));
+["cMsgs", "settings", "welcome", "notes"].forEach((id) => overlayBar($c(id)));
 
 applySettings(settings);
 
