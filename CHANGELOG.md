@@ -10,6 +10,16 @@ code it started with, so new helpers won't exist until you do. If
 
 ## [Unreleased]
 
+## [2.5.0] — 2026-11-23
+
+### Changed
+
+- **An empty chat shows the welcome card.** Before, the welcome screen showed
+  only the first time a file opened the plugin. After that, an empty chat had
+  only one short line of text. Now any chat with no messages shows the
+  illustration, the title and the feature rows. A cleared chat shows it too.
+  The card sits in the middle of the chat. The first message replaces it.
+
 ## [2.4.1] — 2026-11-23
 
 ### Fixed
