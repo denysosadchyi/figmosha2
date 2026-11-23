@@ -721,7 +721,7 @@ async function language() {
   check("the static texts follow", [p.$("#cInput").placeholder, p.$("#settings h2").textContent], [p.tr("placeholder"), p.tr("settings")]);
   check("the status label follows", [p.label(), p.$("#icon").title], [p.tr("stOk"), p.tr("stOk")]);
   p.$("#sBack").click();
-  check("the empty chat hint follows", p.$("#cMsgs .hint").textContent, p.tr("empty"));
+  check("the empty chat card follows", p.$("#cMsgs .hint h2").textContent, p.w.eval("WELCOME_TEXT").en.title);
   check("no Ukrainian left in the English interface", uiText().filter((x) => CYR.test(x)), []);
   check("English texts have no dashes or quotes", uiText().filter((x) => DASHQ.test(x)), []);
 
@@ -1291,7 +1291,13 @@ async function historyLoads() {
 
 async function emptyStates() {
   const p = await open();
-  check("the empty chat shows the hint", p.$("#cMsgs .hint").textContent, p.tr("empty"));
+  // No chat yet: the same card as the welcome screen, not a bare line of text.
+  const W = p.w.eval("WELCOME_TEXT").uk;
+  check("the empty chat shows the welcome card", p.$("#cMsgs .hint h2") && p.$("#cMsgs .hint h2").textContent, W.title);
+  truthy("the card has the illustration", p.$("#cMsgs .hint svg.willo"));
+  check("the card has the feature rows", [...p.d.querySelectorAll("#cMsgs .hint .wrow")].map((r) => r.textContent), W.rows.map((r) => r.text));
+  check("the card has no second composer", p.$("#cMsgs .hint .compose"), null);
+  check("the card adds no duplicate ids", p.d.querySelectorAll("#welcomeH").length, 1);
   p.push({ kind: "busy", busy: true });
   p.push({ kind: "delta", text: "a" });
   await wait();

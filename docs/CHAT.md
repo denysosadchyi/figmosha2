@@ -415,6 +415,16 @@ when it closes, so the draft and the photos stay. The field has the focus. All i
   settings). code.js writes `"1"` to the flag. Plugin data errors are caught.
 - Tests: `tests/welcome_code.test.js` (code.js), `tests/welcome_dom.test.js` (UI), `tests/welcome_composer.test.js` (the composer).
 
+### Empty chat
+
+A chat with no messages and no stream shows the same card as the welcome
+screen in `#cMsgs .hint.wempty`: the illustration, the title, the intro line
+and the feature rows (`welcomeBody()` in `ui.html`). It has no composer and no
+`welcomeH` id; the composer stays in its normal place. The art pattern id is
+`wDotsE`, so it never doubles the id of the open welcome screen. The card shows
+for a new file after the welcome screen closes and for any file whose history
+is empty (a cleared chat too). The first message or stream replaces it.
+
 ### Onboarding
 
 The very first run of a USER (any file) shows the onboarding `#onboard`

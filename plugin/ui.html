@@ -259,6 +259,8 @@
   /* notice card: a new version is out, or the plugin needs a re-run */
   .mrow.notice { align-self:stretch; max-width:100%; margin-top:12px; }
   .hint + .mrow.notice { margin-top:0; }
+  .hint.wempty { margin:0 0 auto; display:flex; flex-direction:column; gap:14px; padding:2px 4px 0; text-align:left; color:var(--text); }
+  @media (prefers-reduced-motion:reduce) { .wempty .willo, .wempty .wrow { animation:none; } }
   .ncard { padding:10px; border:1px solid var(--line2); border-radius:var(--r-lg); background:var(--surface); }
   .nhead { display:flex; align-items:flex-start; gap:10px; }
   .nicon { flex:none; display:grid; place-items:center; width:28px; height:28px; border-radius:50%; background:var(--accent-soft); color:var(--accent); }
@@ -1256,7 +1258,12 @@ function renderChat() {
   const last = chat.messages[chat.messages.length - 1];
   let html = chat.messages.map((m) => rowHtml(m, last, ans)).join("");
   if (chat.stream) html += `<div class="mrow claude"><div class="msg claude stream">${C.renderText(chat.stream)}</div></div>`;
-  if (!html) html = `<div class="hint">${t("empty")}</div>`;
+  // No chat yet: the same card as the welcome screen (docs/CHAT.md, Empty chat).
+  if (!html) {
+    let card = "";
+    try { card = welcomeBody(""); } catch (e) { /* before the welcome texts load */ }
+    html = card ? `<div class="hint wempty">${card}</div>` : `<div class="hint">${t("empty")}</div>`;
+  }
   html += noticeHtml();
   if (box._html !== html) {
     const act = document.activeElement, ak = act && act.closest && act.closest(".qf") ? act.closest(".qf").dataset.k : null;
@@ -1668,16 +1675,23 @@ function dockCompose(inWelcome) {
   else if (welcomeEl.contains(cCompose)) { const g = $c("cGlow"); g.before($c("cToast")); g.after(cCompose); cCompose.after($c("cNoAgent")); }
   placeGlow();
 }
+// The art, the title and the feature rows. The welcome screen and the empty chat
+// both show them; only the screen gives the title its id.
+function welcomeBody(id) {
+  const W = WELCOME_TEXT[uiLang] || WELCOME_TEXT.uk;
+  // The empty chat can sit next to the open screen: its art gets its own pattern id.
+  const art = id ? WELCOME_ART : WELCOME_ART.replace(/wDots/g, "wDotsE");
+  return '<div class="wart">' + art + '</div>'
+    + '<div class="whead"><h2' + (id ? ' id="' + id + '"' : '') + '>' + C.esc(W.title) + '</h2><p>' + C.esc(W.intro) + '</p></div>'
+    + '<ul class="wlist">' + W.rows.map((r) => '<li class="wrow"><span class="wico"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">'
+      + WELCOME_ICONS[r.icon] + '</g></svg></span><span>' + C.esc(r.text) + '</span></li>').join("") + '</ul>';
+}
 function renderWelcome() {
   const W = WELCOME_TEXT[uiLang] || WELCOME_TEXT.uk;
   const had = welcomeEl.contains(cCompose), focused = had && cCompose.contains(document.activeElement) && document.activeElement;
   if (had) dockCompose(false);
   welcomeEl.setAttribute("aria-label", W.label);
-  welcomeEl.innerHTML = '<div class="wart">' + WELCOME_ART + '</div>'
-    + '<div class="whead"><h2 id="welcomeH">' + C.esc(W.title) + '</h2><p>' + C.esc(W.intro) + '</p></div>'
-    + '<ul class="wlist">' + W.rows.map((r) => '<li class="wrow"><span class="wico"><svg viewBox="0 0 24 24" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">'
-      + WELCOME_ICONS[r.icon] + '</g></svg></span><span>' + C.esc(r.text) + '</span></li>').join("") + '</ul>'
-    + '<div class="wacts"><div class="wcomp"></div></div>';
+  welcomeEl.innerHTML = welcomeBody("welcomeH") + '<div class="wacts"><div class="wcomp"></div></div>';
   if (had) { dockCompose(true); if (focused) focused.focus(); }
 }
 function showWelcome(on) {
