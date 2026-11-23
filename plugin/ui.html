@@ -225,10 +225,6 @@
   .compose { position:relative; z-index:2; margin:0 8px 8px; display:flex; flex-wrap:wrap; gap:7px 8px; padding:7px; border-radius:var(--r-lg); background:var(--raised); box-shadow:var(--compose-shadow); align-items:flex-end; }
   .typing { order:-1; width:calc(100% + 14px); display:flex; align-items:center; gap:8px; height:40px; margin:-7px -7px 0; padding:0 8px 0 14px; border-bottom:1px solid var(--line); font-size:13px; color:var(--muted); }
   .typing[hidden] { display:none; }
-  .typing .dots { display:inline-flex; gap:3px; flex:none; }
-  .typing .dots i { width:5px; height:5px; border-radius:50%; background:var(--accent); animation:blink 1.2s ease-in-out infinite; }
-  .typing .dots i:nth-child(2) { animation-delay:.2s; } .typing .dots i:nth-child(3) { animation-delay:.4s; }
-  @keyframes blink { 0%, 80%, 100% { opacity:.25; transform:translateY(0); } 40% { opacity:1; transform:translateY(-2px); } }
   .typing span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .typing small { color:var(--faint); font-size:11px; font-variant-numeric:tabular-nums; white-space:nowrap; }
   .stop { flex:none; width:28px; height:28px; padding:0; border:0; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; color:var(--muted); background:transparent; cursor:pointer; }
@@ -256,12 +252,10 @@
   .glow { position:absolute; z-index:1; left:6%; right:6%; bottom:44px; height:16px; filter:blur(12px); pointer-events:none; opacity:0; transition:opacity .3s; }
   .glow::before, .glow::after { content:""; position:absolute; top:0; bottom:0; border-radius:50%; }
   .glow::before { left:0; right:0; opacity:.35; background:linear-gradient(90deg, var(--glow-a), var(--glow-b), var(--glow-a), var(--glow-b), var(--glow-a)) 0 0 / 400% 100%; }
-  .glow::after { left:0; width:40%; background:linear-gradient(90deg, var(--glow-a), var(--glow-b)); }
+  .glow::after { left:0; width:60%; opacity:.4; background:linear-gradient(90deg, var(--glow-a), var(--glow-b)); }
   .glow.on { opacity:1; }
-  .glow.on::before { animation:glow-flow 2.4s linear infinite; }
   .glow.on::after { animation:beam 1.1s cubic-bezier(.45,0,.55,1) infinite alternate; }
-  @keyframes beam { 0% { transform:translateX(0) scaleY(.7); } 50% { transform:translateX(75%) scaleY(1.5); } 100% { transform:translateX(150%) scaleY(.7); } }
-  @keyframes glow-flow { from { background-position:0 0; } to { background-position:66.67% 0; } }
+  @keyframes beam { 0% { transform:translateX(0) scaleY(.7); } 50% { transform:translateX(33.33%) scaleY(1.5); } 100% { transform:translateX(66.67%) scaleY(.7); } }
   /* notice card: a new version is out, or the plugin needs a re-run */
   .mrow.notice { align-self:stretch; max-width:100%; margin-top:12px; }
   .hint + .mrow.notice { margin-top:0; }
@@ -421,7 +415,7 @@
   .sbar-thumb:hover { width:6px; background:color-mix(in srgb, var(--faint) 75%, transparent); }
   .sbar.drag .sbar-thumb { width:6px; background:color-mix(in srgb, var(--faint) 75%, transparent); }
   @media (prefers-reduced-motion:reduce) { .sbar, .sbar.on, .sbar-thumb { transition:none; } }
-  @media (prefers-reduced-motion:reduce) { .typing .dots i, .glow.on::before, .glow.on::after, .msg.stream::after { animation:none; } }
+  @media (prefers-reduced-motion:reduce) { .glow.on::after, .msg.stream::after { animation:none; } }
 </style>
 </head>
 <body>
@@ -442,7 +436,6 @@
     <form class="compose" id="cCompose">
       <div class="cmds" id="cCmds" role="listbox" aria-label="Команди Claude" hidden></div>
       <div class="typing" id="cTyping" hidden>
-        <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
         <span id="cStep" role="status"></span><small id="cTime"></small>
         <button class="stop" id="cStop" type="button" title="Перервати завдання" aria-label="Перервати завдання"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M12 22C7.28595 22 4.92893 22 3.46447 20.5355C2 19.0711 2 16.714 2 12C2 7.28595 2 4.92893 3.46447 3.46447C4.92893 2 7.28595 2 12 2C16.714 2 19.0711 2 20.5355 3.46447C22 4.92893 22 7.28595 22 12C22 16.714 22 19.0711 20.5355 20.5355C19.0711 22 16.714 22 12 22Z"/></svg></button>
       </div>
@@ -1240,7 +1233,8 @@ cMsgs.addEventListener("scroll", () => {
   chatStick = cMsgs.scrollHeight - cMsgs.scrollTop - cMsgs.clientHeight < 40 || cMsgs.scrollTop >= autoTop - 2;
 });
 // code.js resizes the window after a scale change or a mode switch: keep the bottom in view.
-window.addEventListener("resize", () => { if (uiMode === "chat" && chatStick) stickBottom(); });
+// The composer refits its height to the new width too: a height from a narrow window must not stay.
+window.addEventListener("resize", () => { grow(cInput); if (uiMode === "chat" && chatStick) stickBottom(); });
 // A photo gets its height only when it loads, after the list was scrolled.
 cMsgs.addEventListener("load", (e) => { if (e.target.tagName === "IMG" && chatStick) stickBottom(); }, true);
 // The glow sits on the top edge of the compose box. The box grows with the typing line, quote and photos,
@@ -1484,19 +1478,19 @@ $c("settings").addEventListener("change", (e) => {
   agentSend({ [k]: o.value });
 });
 // Window resize by the edge and corner zones. The UI sends the new size at
-// scale 1, at most once per frame, and done once at the end. code.js clamps it,
-// resizes the window and stores the size. The window always grows to the right
-// and down (see docs/CHAT.md, Window size).
+// scale 1 with the dragged edge, at most once per frame, and done once at the end.
+// code.js clamps it, resizes the window and stores the size. A left or top edge
+// moves the window too, so the opposite side stays (see docs/CHAT.md, Window size).
 let rz = null;
 function rzSize(e) {
   const dx = e.screenX - rz.x, dy = e.screenY - rz.y, ed = rz.edge, k = settings.scale || 1;
   let w = rz.w, h = rz.h;
   if (/e$/.test(ed)) w += dx; else if (/w$/.test(ed)) w -= dx;
   if (/^s/.test(ed)) h += dy; else if (/^n/.test(ed)) h -= dy;
-  return { w: Math.round(w / k), h: Math.round(h / k) };
+  return { w: Math.round(w / k), h: Math.round(h / k), edge: ed };
 }
 function rzPost(size, done) {
-  const m = { type: "resize", w: size.w, h: size.h };
+  const m = { type: "resize", w: size.w, h: size.h, edge: size.edge };
   if (done) m.done = true;
   parent.postMessage({ pluginMessage: m }, "*");
 }

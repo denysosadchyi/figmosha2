@@ -199,6 +199,7 @@ async function edges() {
   near("e: width grows", last(got).w, 430);
   check("e: height stays", last(got).h, 560);
   check("e: done once", dones(got).length, 1);
+  check("e: the message names the edge", [last(got).edge, dones(got)[0].edge], ["e", "e"]);
   p.close();
 
   const s = await open();
@@ -212,6 +213,7 @@ async function edges() {
   got = await l.drag("w", [[-60, 30]]);
   near("w: dragging left makes it wider", last(got).w, 440);
   check("w: height stays", last(got).h, 560);
+  check("w: the message names the edge", [last(got).edge, dones(got)[0].edge], ["w", "w"]);
   l.close();
 
   const t = await open();
@@ -230,6 +232,7 @@ async function edges() {
   got = await nw.drag("nw", [[-30, -40]]);
   near("nw: left grows width", last(got).w, 410);
   near("nw: up grows height", last(got).h, 600);
+  check("nw: the message names the edge", last(got).edge, "nw");
   nw.close();
 
   const sw = await open();
@@ -391,8 +394,24 @@ async function stacking() {
   p.close();
 }
 
+// The window size changes (a drag, a scale change): the composer refits its
+// height to the text at the new width. Before, a height from a narrow window
+// stayed after it got wider, and the empty field was 3 lines tall.
+async function composerRefit() {
+  const p = await open();
+  const ta = p.d.getElementById("cInput");
+  let sh = 92;
+  Object.defineProperty(ta, "scrollHeight", { get: () => sh, configurable: true });
+  ta.dispatchEvent(new p.w.Event("input", { bubbles: true }));
+  check("input grows the composer", ta.style.height, "92px");
+  sh = 32; p.setSize(500, 560); p.w.dispatchEvent(new p.w.Event("resize")); await wait();
+  check("window resize refits the composer", ta.style.height, "32px");
+  check("no script errors", p.errors, []);
+  p.close();
+}
+
 (async () => {
-  for (const t of [zones, barMode, corner, throttle, edges, scaled, onSettingsPage, lostPointerup, dragEnds, stacking]) {
+  for (const t of [composerRefit, zones, barMode, corner, throttle, edges, scaled, onSettingsPage, lostPointerup, dragEnds, stacking]) {
     console.log(`\n${t.name}`);
     try { await t(); } catch (e) { failed++; console.log(" FAIL  threw: " + (e.stack || e).toString().split("\n").slice(0, 3).join(" | ")); }
   }

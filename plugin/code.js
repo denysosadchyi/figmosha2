@@ -96,16 +96,44 @@ function cleanChatSize(v) {
   if (typeof v.w !== "number" || typeof v.h !== "number" || !isFinite(v.w) || !isFinite(v.h)) return null;
   return [Math.min(CHAT_MAX[0], Math.max(CHAT_MIN[0], v.w)), Math.min(CHAT_MAX[1], Math.max(CHAT_MIN[1], v.h))];
 }
-// {type: "resize", w, h[, done]} from the UI edge zones. Chat mode only.
-// The window grows to the right and down even from the left or top edge,
-// see docs/CHAT.md (Window size).
+// {type: "resize", w, h, edge[, done]} from the UI edge zones. Chat mode only.
+// A left or top edge (w, nw, sw, n, ne) keeps the opposite side in place: the
+// window moves by the size change since the drag start, see docs/CHAT.md (Window size).
+let rzAnchor = null;  // {x, y, w, h}: canvas spot and window px size at the drag start
+function canvasPos() {
+  try {
+    if (typeof figma.ui.getPosition !== "function") return null;
+    const p = figma.ui.getPosition();
+    return cleanChatPos(p && p.canvasSpace);
+  } catch (e) { return null; }
+}
+// Move the window so the side opposite the dragged edge stays where it was at
+// the drag start. reposition takes canvas units: window px / zoom.
+function keepOppositeSide(edge, size) {
+  try {
+    const vp = figma.viewport, z = vp && vp.zoom, a = rzAnchor;
+    if (!a || !(z > 0) || typeof figma.ui.reposition !== "function") return;
+    const w = Math.round(size[0] * uiScale), h = Math.round(size[1] * uiScale);
+    figma.ui.reposition(/w$/.test(edge) ? a.x + (a.w - w) / z : a.x,
+                        /^n/.test(edge) ? a.y + (a.h - h) / z : a.y);
+  } catch (e) { /* old Figma */ }
+}
 async function setChatSize(msg) {
   if (uiMode !== "chat") return;
   const size = cleanChatSize(msg);
   if (!size) return;
+  const edge = typeof msg.edge === "string" ? msg.edge : "";
+  const moves = /w$|^n/.test(edge);
+  if (!moves) rzAnchor = null;
+  else if (!rzAnchor) {
+    const c = canvasPos();  // before the resize: the spot at the drag start
+    if (c) rzAnchor = { x: c.x, y: c.y, w: Math.round(chatSize[0] * uiScale), h: Math.round(chatSize[1] * uiScale) };
+  }
   chatSize = size;
   resizeUi();
+  if (moves) keepOppositeSide(edge, size);
   if (msg.done) {
+    rzAnchor = null;
     try { await figma.clientStorage.setAsync(CHAT_SIZE_KEY, { w: size[0], h: size[1] }); } catch (e) { /* storage off */ }
     await saveChatPos(readPos());
   }

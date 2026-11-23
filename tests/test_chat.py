@@ -937,6 +937,47 @@ def test_language_change_restarts_claude_and_keeps_the_session(chat_env):
     run(go())
 
 
+def _blocks(msg):
+    c = msg["message"]["content"]
+    return [c] if isinstance(c, str) else [b.get("text", "") for b in c if b.get("type") == "text"]
+
+
+def test_language_change_tells_claude_once(chat_env):
+    """--resume keeps the old talk, and Claude follows its language over a one-line
+    system prompt. So the first message after a switch carries a note too, once."""
+    async def go():
+        async with bridge_client() as c:
+            await send(c, "dA", "say a")
+            await idle_with(c, "dA", 1)
+            await send(c, "dA", "say b", lang="en")
+            h = await idle_with(c, "dA", 2)
+            assert h["messages"][-1]["text"] == "b"
+            assert [m["text"] for m in h["messages"] if m["from"] == "me"] == ["say a", "say b"]
+            await send(c, "dA", "say c")
+            await idle_with(c, "dA", 3)
+            await send(c, "dA", "say d", lang="uk")
+            await idle_with(c, "dA", 4)
+        a, b, cc, d = stdin_msgs(chat_env)
+        assert not [x for x in _blocks(a) if "language" in x or "Мову" in x]
+        assert any("Reply in English" in x for x in _blocks(b)), _blocks(b)
+        assert not [x for x in _blocks(cc) if "language" in x], "the note is sent once"
+        assert any("українською" in x for x in _blocks(d)), _blocks(d)
+    run(go())
+
+
+def test_language_note_skips_a_fresh_chat(chat_env):
+    async def go():
+        async with bridge_client() as c:
+            await send(c, "dA", "say a", lang="en")      # nothing said yet: the system prompt is enough
+            await idle_with(c, "dA", 1)
+            await send(c, "dA", "say b", lang="uk")
+            await idle_with(c, "dA", 2)
+        a, b = stdin_msgs(chat_env)
+        assert not [x for x in _blocks(a) if "language" in x or "Мову" in x]
+        assert any("українською" in x for x in _blocks(b))
+    run(go())
+
+
 def test_bad_lang_is_ignored(chat_env):
     async def go():
         async with bridge_client() as c:

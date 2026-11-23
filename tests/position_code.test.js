@@ -506,8 +506,64 @@ async function restartTests() {
     [p.calls.repos.length, p.calls.ops[p.calls.ops.length - 1], p.win.x, p.win.y], [1, "reposition", 250, 120]);
 }
 
+async function edgeAnchorTests() {
+  // Left and top edges: the opposite side stays in place. The UI names the
+  // edge in the resize message; code.js moves the window by the size change
+  // measured from the drag start (window px / zoom = canvas units).
+  let p = await chat({ zoom: 2, bounds: { x: 100, y: 50, width: 800, height: 450 }, win: { x: 500, y: 300 } });
+  const r0 = p.calls.repos.length;
+  await p.send({ type: "resize", w: 440, h: 560, edge: "w" });
+  check("w: window moves left by the added width", [p.win.x, p.win.y], [440, 300]);
+  await p.send({ type: "resize", w: 480, h: 560, edge: "w" });
+  check("w: each step measures from the drag start", [p.win.x, p.win.y], [400, 300]);
+  await p.send({ type: "resize", w: 480, h: 560, edge: "w", done: true });
+  check("w: done keeps the right side", [p.win.x, p.win.y], [400, 300]);
+  check("w: reposition comes after the resize", p.calls.ops.slice(-2), ["resize", "reposition"]);
+  checkTrue("w: repositions happened", p.calls.repos.length > r0, "repos " + p.calls.repos.length);
+  // A new drag measures from its own start.
+  await p.send({ type: "resize", w: 380, h: 560, edge: "w", done: true });
+  check("w: second drag narrows back from its own start", [p.win.x, p.win.y], [500, 300]);
+
+  p = await chat({ win: { x: 500, y: 300 } });
+  await p.send({ type: "resize", w: 380, h: 600, edge: "n", done: true });
+  check("n: window moves up by the added height", [p.win.x, p.win.y], [500, 260]);
+
+  p = await chat({ win: { x: 500, y: 300 } });
+  await p.send({ type: "resize", w: 400, h: 600, edge: "nw", done: true });
+  check("nw: both sides move", [p.win.x, p.win.y], [480, 260]);
+
+  p = await chat({ win: { x: 500, y: 300 } });
+  await p.send({ type: "resize", w: 400, h: 600, edge: "sw", done: true });
+  check("sw: only the left side moves", [p.win.x, p.win.y], [480, 300]);
+  p = await chat({ win: { x: 500, y: 300 } });
+  await p.send({ type: "resize", w: 400, h: 600, edge: "ne", done: true });
+  check("ne: only the top side moves", [p.win.x, p.win.y], [500, 260]);
+
+  for (const edge of ["e", "s", "se", undefined, 7]) {
+    p = await chat({ win: { x: 500, y: 300 } });
+    const n = p.calls.repos.length;
+    await p.send({ type: "resize", w: 450, h: 650, edge, done: true });
+    check("edge " + edge + ": no reposition", p.calls.repos.length, n);
+  }
+
+  // The scale and the clamp count: the move is the real window size change.
+  p = await chat({ win: { x: 500, y: 300 }, settings: { scale: 1.25, theme: "system" } });
+  await p.send({ type: "resize", w: 420, h: 560, edge: "w", done: true });
+  check("scale 1.25: moves by the scaled width", [p.win.x, p.win.y], [450, 300]);
+  p = await chat({ win: { x: 900, y: 300 } });
+  await p.send({ type: "resize", w: 5000, h: 560, edge: "w", done: true });
+  check("clamped width: moves by the clamped change", [p.win.x, p.win.y], [380, 300]);
+
+  // Old Figma: no getPosition or no reposition. The resize still works.
+  for (const o of [{ noGetPos: true }, { noRepos: true }, { getPosThrows: true }, { noViewport: true }]) {
+    p = await chat(Object.assign({ win: { x: 500, y: 300 } }, o));
+    await p.send({ type: "resize", w: 440, h: 560, edge: "w", done: true });
+    check("old Figma " + JSON.stringify(o) + ": resize works", p.calls.resize[p.calls.resize.length - 1], [440, 560]);
+  }
+}
+
 (async () => {
-  for (const [name, fn] of [["welcome", welcomeTests], ["drag", dragTests], ["restart", restartTests],["mutants", mutantTests], ["track", trackTests], ["bar", barTests], ["restore", restoreTests],
+  for (const [name, fn] of [["edge anchor", edgeAnchorTests], ["welcome", welcomeTests], ["drag", dragTests], ["restart", restartTests],["mutants", mutantTests], ["track", trackTests], ["bar", barTests], ["restore", restoreTests],
       ["clamp", clampTests], ["bad values", badValueTests], ["old Figma", oldFigmaTests],
       ["storage", storageTests], ["close", closeTests]]) {
     try { await fn(); } catch (e) { failed++; console.log(` FAIL  ${name} threw: ${e.stack || e.message}`); }

@@ -19,7 +19,11 @@ It uses the user's own Claude login (subscription). Permissions are always
 bypassed. The first message starts a new session; after that the session id is
 saved and every restart uses `--resume`.
 `--model` and `--effort` come from the agent settings (default `opus` and `medium`).
-A change of the model, the effort or the language restarts the process with `--resume`.
+A change of the model, the effort or the language restarts the process with `--resume`. A
+language change after the agent has replied also adds a one-time note as the last text
+block of the next message ("Reply in English from this message on"), because the resumed
+talk pulls the agent back to its old language. The flag survives a bridge restart
+(`lang_note` in the history file); slash commands do not use it up.
 The same chat can also run on Codex, see Providers.
 
 Environment for the process:
@@ -322,9 +326,12 @@ code.js acts only in chat mode, ignores anything but two finite numbers, clamps
 the base size to 320x400 .. 900x1400, calls `figma.ui.resize(w*scale, h*scale)`
 and on done stores `{w, h}` in `figma.clientStorage` key `figmosha-chat-size`.
 On start and on the chat icon chat mode uses that size (an invalid value gives
-380x560). A scale change keeps the base size. Left and top edges: the window
-still grows to the right and down (the resize message has no edge, and moving
-the window on every frame in canvas coordinates would jitter). A drag whose
+380x560). A scale change keeps the base size. Left and top edges: the message also
+carries `edge`, and for w, nw, sw, n, ne code.js keeps the opposite side in
+place. At the first step of a drag it reads `getPosition().canvasSpace` and the
+window size, then after each resize calls `figma.ui.reposition` moved by the
+size change / zoom. Done clears that anchor. Old Figma without getPosition or
+reposition only resizes. A window resize also refits the composer height. A drag whose
 pointerup is lost outside the iframe ends on the next move with no button held.
 
 Window position. code.js keeps the chat position per user in

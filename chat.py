@@ -109,6 +109,8 @@ LANGS = ("uk", "en")
 TEXTS = {
     "uk": {
         "reply": "Reply in Ukrainian.",
+        "lang_switched": "(Мову чату змінено на українську. Reply in Ukrainian from this message on, "
+                         "even if the talk so far was in another language. Відповідай українською.)",
         "disk": "Не можу зберегти історію чату на диск. Перевір місце на диску і права на папку.",
         "died": "Claude Code зупинився (код {code}). {tail}",
         "compacting": "Стискаю розмову",
@@ -138,6 +140,8 @@ TEXTS = {
     },
     "en": {
         "reply": "Reply in English.",
+        "lang_switched": "(The chat language is now English. Reply in English from this message on, "
+                         "even if the talk so far was in another language.)",
         "disk": "Cannot save the chat history to disk. Check the free space and the folder rights.",
         "died": "Claude Code stopped (code {code}). {tail}",
         "compacting": "Compacting the conversation",
@@ -775,6 +779,8 @@ class Session:
         nid = h.get("next_id")
         self.next_id = max(nid, top) if type(nid) is int else top
         self.lang = h.get("lang") if h.get("lang") in LANGS else "uk"
+        # The language changed after the agent spoke: the next message tells it once (see send).
+        self.lang_note = h.get("lang_note") is True
         # (provider, model) of the file's last turn, for the switch note. Older files: Claude on Opus.
         agent = h.get("agent")
         if isinstance(agent, list) and len(agent) == 2 and all(isinstance(x, str) for x in agent):
@@ -790,6 +796,8 @@ class Session:
     def save(self):
         try:
             data = {"next_id": self.next_id, "messages": self.messages, "lang": self.lang}
+            if self.lang_note:
+                data["lang_note"] = True
             if self.last_agent:
                 data["agent"] = list(self.last_agent)
             _write_json(self._history_file(), data)
@@ -811,6 +819,9 @@ class Session:
         """The plugin's language setting. Anything but uk or en is ignored."""
         if lang in LANGS and lang != self.lang:
             self.lang = lang
+            # --resume keeps the old talk, and the agent follows its language more than
+            # the system prompt. A chat with no agent reply yet needs no note.
+            self.lang_note = any(m.get("from") not in ("me", "system") for m in self.messages)
             self.save()
 
     def t(self, key, **kw):
@@ -1570,10 +1581,19 @@ async def send(doc, body):
             content.append({"type": "text", "text": text})
     else:
         content = prefix + text
+    prompt = prefix + text
+    if s.lang_note:     # a separate last block: the message itself still comes first
+        note = s.t("lang_switched")
+        if isinstance(content, str):
+            content = [{"type": "text", "text": content}]
+        content.append({"type": "text", "text": note})
+        prompt += "\n\n" + note
+        s.lang_note = False
+        s.save()
     files = [str(_uploads() / u.rsplit("/", 1)[-1]) for u, _, _ in images]
 
     await s.set_busy(True)
-    s.inbox.put_nowait(_Job(content, prefix + text, files))
+    s.inbox.put_nowait(_Job(content, prompt, files))
     s.ensure_worker()
     return 200, {"ok": True, "id": m["id"]}
 

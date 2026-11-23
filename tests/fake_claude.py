@@ -81,10 +81,14 @@ def out(obj):
     sys.stdout.flush()
 
 
+LANG_NOTE = ("(Мову чату змінено", "(The chat language is now")   # chat.TEXTS lang_switched
+
+
 def text_of(content):
     if isinstance(content, str):
         return content
-    return "\n".join(b.get("text", "") for b in content if b.get("type") == "text")
+    return "\n".join(b.get("text", "") for b in content
+                     if b.get("type") == "text" and not b.get("text", "").startswith(LANG_NOTE))
 
 
 def say(text):
