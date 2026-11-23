@@ -22,6 +22,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import uuid
@@ -100,7 +101,7 @@ def bridge_outdated() -> bool:
 # Releasing (see AGENTS.md → Releasing): bump VERSION here, move CHANGELOG's
 # "Unreleased" under the new version, tag vX.Y.Z and push the tag.
 
-VERSION = "2.5.1"
+VERSION = "2.6.0"
 REPO = "denysosadchyi/figmosha2"
 UPDATE_EVERY = 6 * 60 * 60   # seconds between checks
 UPDATE_FIRST_DELAY = 5       # seconds: let the plugins reconnect first
@@ -166,12 +167,180 @@ async def _send_update(ws, clear=False):
         pass
 
 
+# ─── auto update ──────────────────────────────────────────────────────────
+# Designers never type git. An agent installed Figmosha with `git clone`, so a
+# newer release installs itself: fetch the release tag, fast-forward master,
+# wait until nothing runs, restart the bridge in place. The plugins get no
+# offer then; when plugin files changed, the existing outdated card asks for
+# one re-run of the plugin. A developer working copy (tracked edits, or a
+# branch other than master) is never touched and keeps the old offer.
+# FIGMOSHA_NO_AUTO_UPDATE=1 turns installing off; FIGMOSHA_FAKE_LATEST never
+# installs.
+
+AUTO_UPDATE_DIR = HERE
+AUTO_RESTART_POLL = 2        # seconds between idle checks before the restart
+AUTO_UPDATE: dict | None = None   # {"version", "state": installing|installed|failed}
+_WINDOWS = os.name == "nt"
+
+
+def _git(*args):
+    """Run git in AUTO_UPDATE_DIR -> (returncode, output). Never raises."""
+    try:
+        # No prompt for a password: a designer cannot answer it, and it would hang.
+        env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
+        out = subprocess.run(["git", *args], cwd=str(AUTO_UPDATE_DIR), capture_output=True,
+                             text=True, timeout=60, stdin=subprocess.DEVNULL, env=env)
+    except Exception as e:
+        return 1, str(e)
+    return out.returncode, (out.stdout if out.returncode == 0 else (out.stderr or out.stdout))
+
+
+def update_method():
+    """Return git for a clean clone on master, else None (the reason is logged)."""
+    if not (Path(AUTO_UPDATE_DIR) / ".git").exists():
+        print("[update] not a git clone: new releases are offered, not installed")
+        return None
+    code, branch = _git("rev-parse", "--abbrev-ref", "HEAD")
+    if code != 0:
+        print(f"[update] git does not run here, so no auto update: {branch.strip()[:200]}")
+        return None
+    if branch.strip() != "master":
+        print(f"[update] on branch {branch.strip()}, not master: no auto update")
+        return None
+    code, dirty = _git("status", "--porcelain", "--untracked-files=no")
+    if code != 0 or dirty.strip():
+        print("[update] local edits in tracked files: no auto update, your work stays")
+        return None
+    return "git"
+
+
+def apply_update(version) -> bool:
+    """Fast-forward this clone to tag v<version>. Blocking, never raises."""
+    try:
+        tag = f"v{version}"
+        code, before = _git("rev-parse", "HEAD")
+        if code != 0:
+            print(f"[update] cannot install {version}: {before.strip()[:200]}")
+            return False
+        code, out = _git("fetch", "--quiet", "--no-tags", "origin", "tag", tag)
+        if code != 0:
+            print(f"[update] cannot fetch {tag}: {out.strip()[:200]}")
+            return False
+        code, out = _git("merge", "--ff-only", "--quiet", tag)
+        if code != 0:
+            print(f"[update] cannot fast-forward to {tag}: {out.strip()[:200]}")
+            return False
+        code, changed = _git("diff", "--name-only", before.strip(), "HEAD", "--",
+                             "requirements.txt")
+        note = ""
+        if code == 0 and changed.strip():
+            note = _pip_install()
+            if note.startswith("pip install failed"):
+                # New code without its packages would not start: go back, try at the next check.
+                _git("reset", "--hard", "--quiet", before.strip())
+                print(f"[update] {note}; stayed on the old version")
+                return False
+            note = "; " + note
+        print(f"[update] installed Figmosha {version}{note}")
+        return True
+    except Exception as e:
+        print(f"[update] cannot install {version}: {e}")
+        return False
+
+
+def _pip_install():
+    """Install requirements.txt with this Python. Returns a short note for the log."""
+    try:
+        out = subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r",
+                              "requirements.txt"], cwd=str(AUTO_UPDATE_DIR),
+                             capture_output=True, text=True, timeout=600)
+    except Exception as e:
+        return f"pip install failed: {e}"
+    if out.returncode != 0:
+        return f"pip install failed: {(out.stderr or out.stdout or '').strip()[-300:]}"
+    return "requirements installed"
+
+
+def bridge_idle() -> bool:
+    """True when no exec is in flight, no file is held and no chat is busy."""
+    if PENDING:
+        return False
+    if any((q or {}).get("running") for q in QUEUE.values()):
+        return False
+    if getattr(chat, "SENDING", 0):     # a message is being stored, not yet busy
+        return False
+    return not any(getattr(s, "busy", False) for s in chat.SESSIONS.values())
+
+
+def restart_bridge():
+    """Replace this process with a fresh bridge on the same command line."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    os.environ["FIGMOSHA_RESTARTED"] = "1"
+    args = [sys.executable] + sys.argv
+    if _WINDOWS:   # Windows execv joins the args with spaces and does not quote them
+        args = [subprocess.list2cmdline([a]) for a in args]
+    os.execv(sys.executable, args)
+
+
+def _auto_install_on():
+    return not os.environ.get("FIGMOSHA_NO_AUTO_UPDATE")
+
+
+def _is_newer(latest):
+    v = parse_version(latest)
+    return bool(v) and v > parse_version(VERSION)
+
+
+async def _auto_update(version) -> bool:
+    """Install `version`, then restart once idle. False when the install failed."""
+    global AUTO_UPDATE
+    AUTO_UPDATE = {"version": version, "state": "installing"}
+    await set_update(None)       # withdraw an offer shown before, if any
+    ok = await asyncio.to_thread(apply_update, version)
+    if not ok:
+        AUTO_UPDATE = {"version": version, "state": "failed"}
+        print(f"[update] Figmosha {version} did not install; trying again at the next check")
+        return False
+    AUTO_UPDATE = {"version": version, "state": "installed"}
+    while not bridge_idle():
+        await asyncio.sleep(AUTO_RESTART_POLL)
+    print(f"[update] restarting the bridge on Figmosha {version}")
+    # The next process skips this version if its code still says an older one,
+    # so a wrong release tag cannot restart the bridge at every start.
+    os.environ["FIGMOSHA_UPDATED_TO"] = version
+    try:
+        restart_bridge()
+    except Exception as e:
+        os.environ.pop("FIGMOSHA_UPDATED_TO", None)
+        AUTO_UPDATE = {"version": version, "state": "failed"}
+        print(f"[update] cannot restart the bridge ({e}); trying again at the next check")
+        return False
+    return True
+
+
 async def _update_loop(app):
+    global AUTO_UPDATE
     await asyncio.sleep(UPDATE_FIRST_DELAY)
     while True:
-        latest = os.environ.get("FIGMOSHA_FAKE_LATEST") or await check_for_update()
-        if latest is not None:
-            await set_update(latest)
+        fake = os.environ.get("FIGMOSHA_FAKE_LATEST")
+        latest = fake or await check_for_update()
+        if latest is not None and not fake and _is_newer(latest) \
+                and latest == os.environ.get("FIGMOSHA_UPDATED_TO"):
+            if AUTO_UPDATE != {"version": latest, "state": "failed"}:
+                print(f"[update] restarted for Figmosha {latest}, but the code still says "
+                      f"{VERSION}: not installing it again")
+            AUTO_UPDATE = {"version": latest, "state": "failed"}
+        elif latest is not None:
+            if (not fake and _is_newer(latest) and _auto_install_on()
+                    and await asyncio.to_thread(update_method) is not None):
+                if await _auto_update(latest):
+                    return
+            else:
+                await set_update(latest)
         await asyncio.sleep(UPDATE_EVERY)
 
 
@@ -935,6 +1104,7 @@ async def status_handler(request: web.Request) -> web.Response:
         "plugin_version": expected_plugin_version(),
         "bridge_outdated": bridge_outdated(),
         "update": UPDATE,
+        "auto_update": AUTO_UPDATE,
         "files": files,
         "pending": len(PENDING),
         "abandoned": [
@@ -1109,11 +1279,28 @@ def main():
           f"-H 'Content-Type: application/json' "
           f"-d '{{\"code\":\"return figma.currentPage.name\"}}'")
 
-    loop = asyncio.new_event_loop()
-    loop.set_exception_handler(_quiet_connection_resets)
-    app = build_app()
-    install_update_checks(app)
-    web.run_app(app, host=hosts, port=args.port, print=None, loop=loop)
+    # After an auto update restart the old process can hold the port for a
+    # moment (Windows above all), so a restarted bridge tries again a while.
+    tries = PORT_RETRIES if os.environ.get("FIGMOSHA_RESTARTED") else 1
+    for attempt in range(tries):
+        loop = asyncio.new_event_loop()
+        loop.set_exception_handler(_quiet_connection_resets)
+        app = build_app()
+        install_update_checks(app)
+        try:
+            web.run_app(app, host=hosts, port=args.port, print=None, loop=loop)
+            return
+        except OSError as e:
+            if not loop.is_closed():
+                loop.close()
+            if attempt + 1 >= tries:
+                raise
+            print(f"[bridge] port {args.port} not free yet after the restart ({e}), retrying")
+            time.sleep(PORT_RETRY_WAIT)
+
+
+PORT_RETRIES = 20
+PORT_RETRY_WAIT = 0.5
 
 
 def _bind_hosts(host, port):

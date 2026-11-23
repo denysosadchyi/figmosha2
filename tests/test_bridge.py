@@ -1366,3 +1366,559 @@ def test_main_installs_update_checks_unless_turned_off(monkeypatch):
                         lambda app, **kw: (got.setdefault("app", app), kw["loop"].close()))
     bridge.main()
     assert bridge._start_update_checks in got["app"].on_startup
+
+
+# ─── auto update ──────────────────────────────────────────────────────────
+# Designers never type git. An agent installed Figmosha with `git clone`, so a
+# newer release installs itself: fetch the tag, fast-forward, restart once the
+# bridge is idle. A developer working copy (dirty or off master) is never
+# touched: it keeps the old offer. Every git repo here is a temp one, with a
+# local bare repo as origin: no network.
+
+import os  # noqa: E402
+import subprocess  # noqa: E402
+import types  # noqa: E402
+
+
+def _sh(cwd, *args):
+    out = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    return out.stdout.strip()
+
+
+@pytest.fixture
+def git_env(monkeypatch, tmp_path):
+    """Isolated git config: a name for commits, master as the default branch."""
+    cfg = tmp_path / "gitconfig"
+    cfg.write_text("[user]\n\tname = t\n\temail = t@t\n[init]\n\tdefaultBranch = master\n"
+                   "[advice]\n\tdetachedHead = false\n")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(cfg))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    return tmp_path
+
+
+def _commit(repo, files, msg="c"):
+    for name, text in files.items():
+        (repo / name).write_text(text)
+    _sh(repo, "add", "-A")
+    _sh(repo, "commit", "-q", "-m", msg)
+    return _sh(repo, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def release_repos(git_env, monkeypatch):
+    """dev (where releases are made) -> origin.git (bare) -> app (the install).
+
+    Returns a namespace with dev, origin, app and release(version, files)."""
+    root = git_env
+    dev, origin, app = root / "dev", root / "origin.git", root / "app"
+    dev.mkdir()
+    _sh(dev, "init", "-q")
+    _commit(dev, {"bridge.py": "v1\n", "requirements.txt": "aiohttp\n", "README.md": "a\n"})
+    _sh(dev, "tag", "v1.0.0")
+    _sh(root, "clone", "-q", "--bare", str(dev), str(origin))
+    _sh(root, "clone", "-q", str(origin), str(app))
+    _sh(dev, "remote", "add", "origin", str(origin))
+
+    def release(version, files):
+        sha = _commit(dev, files, f"release {version}")
+        _sh(dev, "tag", f"v{version}")
+        _sh(dev, "push", "-q", "origin", "master", f"v{version}")
+        return sha
+
+    monkeypatch.setattr(bridge, "AUTO_UPDATE_DIR", app, raising=False)
+    return types.SimpleNamespace(dev=dev, origin=origin, app=app, release=release)
+
+
+# update_method: "git" only for a clean master clone
+
+def test_update_dir_defaults_to_the_bridge_folder():
+    assert Path(bridge.AUTO_UPDATE_DIR) == bridge.HERE
+
+
+def test_update_method_is_git_for_a_clean_master_clone(release_repos):
+    assert bridge.update_method() == "git"
+    # untracked files (logs, a venv) do not make it a developer copy
+    (release_repos.app / "bridge.log").write_text("x")
+    assert bridge.update_method() == "git"
+
+
+def test_update_method_is_none_for_a_dirty_clone(release_repos, capsys):
+    (release_repos.app / "bridge.py").write_text("my local edit\n")
+    capsys.readouterr()
+    assert bridge.update_method() is None
+    assert capsys.readouterr().out.strip()          # says why, once
+    assert (release_repos.app / "bridge.py").read_text() == "my local edit\n"
+
+
+def test_update_method_is_none_off_master(release_repos, capsys):
+    _sh(release_repos.app, "checkout", "-q", "-b", "feature")
+    capsys.readouterr()
+    assert bridge.update_method() is None
+    assert capsys.readouterr().out.strip()
+
+
+def test_update_method_is_none_without_a_git_folder(monkeypatch, tmp_path, capsys):
+    (tmp_path / "bridge.py").write_text("x")
+    monkeypatch.setattr(bridge, "AUTO_UPDATE_DIR", tmp_path, raising=False)
+    assert bridge.update_method() is None
+    assert capsys.readouterr().out.strip()
+
+
+def test_update_method_is_none_when_git_cannot_run(release_repos, monkeypatch):
+    def no_git(*a, **kw):
+        raise FileNotFoundError("git")
+    monkeypatch.setattr(bridge.subprocess, "run", no_git)
+    assert bridge.update_method() is None
+
+
+def test_git_helper_runs_in_the_update_dir_and_never_raises(release_repos, monkeypatch):
+    code, out = bridge._git("rev-parse", "--abbrev-ref", "HEAD")
+    assert code == 0 and out.strip() == "master"
+    code, _ = bridge._git("no-such-command")
+    assert code != 0
+
+    seen = {}
+
+    def boom(*a, **kw):
+        seen.update(kw)
+        raise subprocess.TimeoutExpired("git", kw.get("timeout", 0))
+    monkeypatch.setattr(bridge.subprocess, "run", boom)
+    code, _ = bridge._git("fetch")
+    assert code != 0 and seen.get("timeout") == 60
+
+
+# apply_update: fetch the tag, fast-forward only
+
+def test_apply_update_fast_forwards_to_the_release_tag(release_repos, capsys):
+    sha = release_repos.release("9.0.0", {"bridge.py": "v9\n"})
+    capsys.readouterr()
+    assert bridge.apply_update("9.0.0") is True
+    assert _sh(release_repos.app, "rev-parse", "HEAD") == sha
+    assert (release_repos.app / "bridge.py").read_text() == "v9\n"
+    assert _sh(release_repos.app, "rev-parse", "--abbrev-ref", "HEAD") == "master"
+    assert "[update]" in capsys.readouterr().out
+
+
+def test_apply_update_refuses_a_diverged_repo_and_leaves_it(release_repos):
+    release_repos.release("9.0.0", {"bridge.py": "v9\n"})
+    local = _commit(release_repos.app, {"bridge.py": "local work\n"}, "local")
+    assert bridge.apply_update("9.0.0") is False
+    assert _sh(release_repos.app, "rev-parse", "HEAD") == local
+    assert (release_repos.app / "bridge.py").read_text() == "local work\n"
+    assert _sh(release_repos.app, "status", "--porcelain", "--untracked-files=no") == ""
+
+
+def test_apply_update_of_a_missing_tag_is_false(release_repos):
+    before = _sh(release_repos.app, "rev-parse", "HEAD")
+    assert bridge.apply_update("9.9.9") is False
+    assert _sh(release_repos.app, "rev-parse", "HEAD") == before
+
+
+def test_apply_update_never_raises(monkeypatch, tmp_path):
+    monkeypatch.setattr(bridge, "AUTO_UPDATE_DIR", tmp_path / "missing", raising=False)
+    assert bridge.apply_update("9.0.0") is False
+
+    def boom(*a, **kw):
+        raise OSError("disk gone")
+    monkeypatch.setattr(bridge, "AUTO_UPDATE_DIR", tmp_path, raising=False)
+    monkeypatch.setattr(bridge.subprocess, "run", boom)
+    assert bridge.apply_update("9.0.0") is False
+
+
+def _record_pip(monkeypatch, returncode=0):
+    """Let git through, record (and fake) every pip call."""
+    calls = []
+    real_run = subprocess.run
+
+    def is_pip(cmd):
+        return isinstance(cmd, (list, tuple)) and cmd and cmd[0] == sys.executable
+
+    def fake_run(cmd, *a, **kw):
+        if is_pip(cmd):
+            calls.append((list(cmd), kw.get("cwd")))
+            return subprocess.CompletedProcess(cmd, returncode, "", "pip failed" if returncode else "")
+        return real_run(cmd, *a, **kw)
+
+    def fake_call(cmd, *a, **kw):
+        if is_pip(cmd):
+            calls.append((list(cmd), kw.get("cwd")))
+            if returncode:
+                raise subprocess.CalledProcessError(returncode, cmd)
+            return 0
+        raise AssertionError("unexpected subprocess call")
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    monkeypatch.setattr(bridge.subprocess, "check_call", fake_call)
+    monkeypatch.setattr(bridge.subprocess, "call", fake_call)
+    return calls
+
+
+def test_apply_update_installs_requirements_only_when_they_changed(release_repos, monkeypatch):
+    calls = _record_pip(monkeypatch)
+    release_repos.release("9.0.0", {"README.md": "b\n"})
+    assert bridge.apply_update("9.0.0") is True
+    assert calls == []
+
+    release_repos.release("9.1.0", {"requirements.txt": "aiohttp\nnewdep\n"})
+    assert bridge.apply_update("9.1.0") is True
+    assert len(calls) == 1
+    cmd, cwd = calls[0]
+    assert cmd == [sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"]
+    assert cwd is not None and Path(cwd).resolve() == release_repos.app.resolve()
+
+
+def test_pip_failure_rolls_back_the_update(release_repos, monkeypatch, capsys):
+    calls = _record_pip(monkeypatch, returncode=1)
+    old = _sh(release_repos.app, "rev-parse", "HEAD")
+    release_repos.release("9.0.0", {"requirements.txt": "aiohttp\nnewdep\n"})
+    capsys.readouterr()
+    assert bridge.apply_update("9.0.0") is False
+    assert len(calls) == 1
+    assert _sh(release_repos.app, "rev-parse", "HEAD") == old
+    assert _sh(release_repos.app, "status", "--porcelain", "--untracked-files=no") == ""
+    assert capsys.readouterr().out.strip()
+
+
+# bridge_idle: nothing running anywhere
+
+def test_bridge_idle_when_nothing_runs():
+    assert bridge.bridge_idle() is True
+
+
+def test_bridge_not_idle_with_a_pending_exec():
+    bridge.PENDING["rid"] = {"future": None, "logs": [], "t0": 0, "conn": "c"}
+    assert bridge.bridge_idle() is False
+
+
+def test_bridge_idle_follows_the_queue_holder():
+    bridge.QUEUE["doc"] = {"waiting": [], "running": {"agent": "a", "since": 0}}
+    assert bridge.bridge_idle() is False
+    bridge.QUEUE["doc"] = {"waiting": [], "running": None}
+    assert bridge.bridge_idle() is True
+
+
+def test_bridge_idle_follows_busy_chat_sessions(monkeypatch):
+    monkeypatch.setitem(chat.SESSIONS, "doc-a", types.SimpleNamespace(busy=False))
+    assert bridge.bridge_idle() is True
+    monkeypatch.setitem(chat.SESSIONS, "doc-b", types.SimpleNamespace(busy=True))
+    assert bridge.bridge_idle() is False
+
+
+# the update loop
+
+class _AutoRig:
+    """Fakes for the update loop: a release check, apply_update, idle, restart."""
+
+    def __init__(self, monkeypatch, *, latest="9.0.0", method="git", ok=True, idle=True,
+                 every=10):
+        self.latest, self.ok, self.idle = latest, ok, idle
+        self.checks, self.applied, self.restarts = 0, [], 0
+        self.state_during_apply = None
+        monkeypatch.delenv("FIGMOSHA_NO_AUTO_UPDATE", raising=False)
+        monkeypatch.delenv("FIGMOSHA_FAKE_LATEST", raising=False)
+        monkeypatch.setattr(bridge, "UPDATE_FIRST_DELAY", 0)
+        monkeypatch.setattr(bridge, "UPDATE_EVERY", every)
+        monkeypatch.setattr(bridge, "AUTO_RESTART_POLL", 0.005, raising=False)
+        monkeypatch.setattr(bridge, "check_for_update", self.check)
+        monkeypatch.setattr(bridge, "update_method", lambda: method, raising=False)
+        monkeypatch.setattr(bridge, "apply_update", self.apply, raising=False)
+        monkeypatch.setattr(bridge, "bridge_idle", lambda: self.idle, raising=False)
+        monkeypatch.setattr(bridge, "restart_bridge", self.restart, raising=False)
+
+    async def check(self):
+        self.checks += 1
+        return self.latest
+
+    def apply(self, version):
+        self.state_during_apply = dict(bridge.AUTO_UPDATE or {})
+        self.applied.append(version)
+        return self.ok
+
+    def restart(self):
+        self.restarts += 1
+
+
+def _offers(plugin):
+    return [m for m in plugin.received if m.get("type") == "update" and m.get("latest")]
+
+
+def test_auto_update_installs_without_offering_and_restarts(monkeypatch):
+    rig = _AutoRig(monkeypatch)
+
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c) as p:
+            task = asyncio.create_task(bridge._update_loop(None))
+            await asyncio.sleep(0.08)
+            async with FakePlugin(c) as late:
+                assert _offers(late) == []
+            task.cancel()
+            assert _offers(p) == []
+        await c.close()
+    run(go())
+    assert rig.applied == ["9.0.0"]
+    assert rig.state_during_apply == {"version": "9.0.0", "state": "installing"}
+    assert bridge.AUTO_UPDATE == {"version": "9.0.0", "state": "installed"}
+    assert rig.restarts == 1
+
+
+def test_auto_update_restarts_only_once_the_bridge_is_idle(monkeypatch):
+    rig = _AutoRig(monkeypatch, idle=False)
+
+    async def go():
+        task = asyncio.create_task(bridge._update_loop(None))
+        await asyncio.sleep(0.06)
+        assert rig.applied == ["9.0.0"] and rig.restarts == 0
+        rig.idle = True
+        await asyncio.sleep(0.05)
+        task.cancel()
+    run(go())
+    assert rig.restarts == 1
+
+
+def test_failed_auto_update_offers_nothing_and_waits_for_the_next_check(monkeypatch):
+    rig = _AutoRig(monkeypatch, ok=False)
+
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c) as p:
+            task = asyncio.create_task(bridge._update_loop(None))
+            await asyncio.sleep(0.08)
+            task.cancel()
+            assert _offers(p) == []
+        await c.close()
+    run(go())
+    assert rig.applied == ["9.0.0"]                 # no tight retry loop
+    assert rig.restarts == 0
+    assert bridge.AUTO_UPDATE == {"version": "9.0.0", "state": "failed"}
+
+
+def test_failed_auto_update_is_tried_again_at_the_next_check(monkeypatch):
+    rig = _AutoRig(monkeypatch, ok=False, every=0.02)
+
+    async def go():
+        task = asyncio.create_task(bridge._update_loop(None))
+        await asyncio.sleep(0.09)
+        task.cancel()
+    run(go())
+    assert len(rig.applied) >= 2
+    assert len(rig.applied) <= rig.checks           # one try per check, never more
+    assert rig.restarts == 0
+
+
+def test_no_newer_release_installs_nothing(monkeypatch):
+    rig = _AutoRig(monkeypatch, latest=bridge.VERSION)
+
+    async def go():
+        task = asyncio.create_task(bridge._update_loop(None))
+        await asyncio.sleep(0.05)
+        task.cancel()
+    run(go())
+    assert rig.applied == [] and rig.restarts == 0 and bridge.AUTO_UPDATE is None
+
+
+@pytest.mark.parametrize("why", ["developer_clone", "no_auto_update", "fake_latest"])
+def test_auto_update_off_keeps_the_offer(monkeypatch, why):
+    """A developer clone, FIGMOSHA_NO_AUTO_UPDATE and FIGMOSHA_FAKE_LATEST
+    never install: the plugins get today's offer."""
+    rig = _AutoRig(monkeypatch, method=None if why == "developer_clone" else "git")
+    if why == "no_auto_update":
+        monkeypatch.setenv("FIGMOSHA_NO_AUTO_UPDATE", "1")
+    if why == "fake_latest":
+        monkeypatch.setenv("FIGMOSHA_FAKE_LATEST", "9.9.9")
+
+    async def go():
+        c = await make_client()
+        async with FakePlugin(c) as p:
+            task = asyncio.create_task(bridge._update_loop(None))
+            await asyncio.sleep(0.08)
+            task.cancel()
+            assert _offers(p)
+        await c.close()
+    run(go())
+    assert rig.applied == [] and rig.restarts == 0
+    assert bridge.UPDATE is not None
+    assert bridge.AUTO_UPDATE is None
+
+
+# restart_bridge and main()
+
+def test_restart_bridge_execs_the_same_command_and_marks_the_restart(monkeypatch):
+    seen = {}
+    flushed = []
+
+    class Stream:
+        def __init__(self, name):
+            self.name = name
+
+        def write(self, s):
+            return len(s)
+
+        def flush(self):
+            flushed.append(self.name)
+
+    def fake_execv(path, args):
+        seen["path"], seen["args"] = path, list(args)
+        seen["env"] = os.environ.get("FIGMOSHA_RESTARTED")
+    monkeypatch.setenv("FIGMOSHA_RESTARTED", "0")
+    monkeypatch.delenv("FIGMOSHA_RESTARTED")
+    monkeypatch.setattr(bridge.os, "execv", fake_execv)
+    monkeypatch.setattr(sys, "argv", ["bridge.py", "--port", "9123"])
+    monkeypatch.setattr(sys, "stdout", Stream("out"))
+    monkeypatch.setattr(sys, "stderr", Stream("err"))
+    bridge.restart_bridge()
+    assert seen["path"] == sys.executable
+    assert seen["args"] == [sys.executable, "bridge.py", "--port", "9123"]
+    assert seen["env"] == "1"
+    assert "out" in flushed and "err" in flushed
+
+
+def _flaky_run_app(monkeypatch, fails):
+    calls = []
+
+    def fake_run_app(app, **kw):
+        calls.append(1)
+        if fails is None or len(calls) <= fails:
+            raise OSError(98, "address already in use")
+        kw["loop"].close()
+    monkeypatch.setattr(sys, "argv", ["bridge.py", "--port", "9123"])
+    monkeypatch.setattr(bridge.web, "run_app", fake_run_app)
+    monkeypatch.setattr(bridge, "_bind_hosts", lambda host, port: [host])
+    monkeypatch.setattr(bridge.time, "sleep", lambda s: None)
+    monkeypatch.setenv("FIGMOSHA_NO_UPDATE_CHECK", "1")
+    return calls
+
+
+def test_main_after_a_restart_waits_for_the_port(monkeypatch):
+    calls = _flaky_run_app(monkeypatch, fails=3)
+    monkeypatch.setenv("FIGMOSHA_RESTARTED", "1")
+    bridge.main()
+    assert len(calls) == 4
+
+
+def test_main_after_a_restart_gives_up_in_the_end(monkeypatch):
+    calls = _flaky_run_app(monkeypatch, fails=None)
+    monkeypatch.setenv("FIGMOSHA_RESTARTED", "1")
+    with pytest.raises(OSError):
+        bridge.main()
+    assert 10 <= len(calls) <= 30
+
+
+def test_main_without_a_restart_does_not_retry(monkeypatch):
+    calls = _flaky_run_app(monkeypatch, fails=None)
+    with pytest.raises(OSError):
+        bridge.main()
+    assert len(calls) == 1
+
+
+# /status
+
+def test_status_reports_auto_update():
+    async def go():
+        c = await make_client()
+        st = await (await c.get("/status")).json()
+        assert "update" in st and st["auto_update"] is None
+        bridge.AUTO_UPDATE = {"version": "9.0.0", "state": "installed"}
+        st = await (await c.get("/status")).json()
+        assert st["auto_update"] == {"version": "9.0.0", "state": "installed"}
+        await c.close()
+    run(go())
+
+
+# the update loop must not restart forever, die quietly or cut a chat message
+
+def test_a_release_that_still_reports_the_old_version_is_not_restarted_for_again(monkeypatch):
+    """A tag whose code still says an older VERSION: after one restart the
+    bridge does not install and restart again for it at every start."""
+    rig = _AutoRig(monkeypatch)
+    monkeypatch.setenv("FIGMOSHA_UPDATED_TO", "9.0.0")     # this process restarted for 9.0.0
+
+    async def go():
+        task = asyncio.create_task(bridge._update_loop(None))
+        await asyncio.sleep(0.05)
+        task.cancel()
+    run(go())
+    assert rig.applied == [] and rig.restarts == 0
+    assert bridge.AUTO_UPDATE["state"] == "failed"
+
+
+def test_auto_update_marks_the_version_it_restarts_for(monkeypatch):
+    rig = _AutoRig(monkeypatch)
+    monkeypatch.delenv("FIGMOSHA_UPDATED_TO", raising=False)
+    seen = {}
+    rig.restart = lambda: seen.setdefault("to", os.environ.get("FIGMOSHA_UPDATED_TO"))
+    monkeypatch.setattr(bridge, "restart_bridge", rig.restart)
+
+    async def go():
+        task = asyncio.create_task(bridge._update_loop(None))
+        await asyncio.sleep(0.05)
+        task.cancel()
+    run(go())
+    assert seen["to"] == "9.0.0"
+
+
+def test_a_failed_restart_keeps_the_update_loop_alive(monkeypatch):
+    rig = _AutoRig(monkeypatch, every=0.02)
+
+    def broken_restart():
+        rig.restarts += 1
+        raise OSError("python moved")
+    monkeypatch.setattr(bridge, "restart_bridge", broken_restart)
+
+    async def go():
+        task = asyncio.create_task(bridge._update_loop(None))
+        await asyncio.sleep(0.09)
+        alive = not task.done()
+        task.cancel()
+        return alive
+    assert run(go()) is True
+    assert rig.restarts >= 2                       # tried again at the next check
+    assert bridge.AUTO_UPDATE["state"] == "failed"
+
+
+def test_restart_on_windows_quotes_paths_with_spaces(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(bridge.os, "execv", lambda path, args: seen.update(args=list(args)))
+    monkeypatch.setattr(bridge, "_WINDOWS", True, raising=False)
+    monkeypatch.setattr(sys, "argv", [r"C:\Users\Anna K\figmosha2\bridge.py", "--port", "9123"])
+    bridge.restart_bridge()
+    assert seen["args"][1] == r'"C:\Users\Anna K\figmosha2\bridge.py"'
+    assert seen["args"][2:] == ["--port", "9123"]
+
+
+def test_bridge_is_busy_while_a_chat_message_is_being_stored(monkeypatch):
+    """The designer's message is saved before the chat turns busy: a restart
+    in that gap would leave the message without an answer."""
+    gate = asyncio.Event
+
+    class Slow:
+        busy = False
+
+        def __init__(self):
+            self.gate = gate()
+
+        def set_lang(self, lang):
+            pass
+
+        def find(self, i):
+            return None
+
+        def t(self, key, **kw):
+            return key
+
+        async def add(self, *a, **kw):
+            await self.gate.wait()
+            return {"id": 1}
+    monkeypatch.setattr(chat, "providers", lambda: [])
+
+    async def go():
+        s = Slow()
+        monkeypatch.setattr(chat, "session", lambda doc: s)
+        task = asyncio.create_task(chat.send("doc1", {"text": "hi"}))
+        await asyncio.sleep(0.01)
+        during = bridge.bridge_idle()
+        s.gate.set()
+        await task
+        return during
+    assert run(go()) is False
+    assert bridge.bridge_idle() is True

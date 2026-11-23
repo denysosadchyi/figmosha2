@@ -15,13 +15,20 @@ import bridge  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def clean_state():
+def clean_state(monkeypatch):
+    # Auto update is off unless a test turns it on: a test that finds a newer
+    # release must never fetch or merge into this checkout.
+    monkeypatch.setenv("FIGMOSHA_NO_AUTO_UPDATE", "1")
+    monkeypatch.delenv("FIGMOSHA_RESTARTED", raising=False)
+    monkeypatch.delenv("FIGMOSHA_UPDATED_TO", raising=False)
+
     def reset():
         for registry in (bridge.PENDING, bridge.PLUGINS, bridge.LOCKS, bridge.ABANDONED,
                          bridge.QUEUE):
             registry.clear()
         bridge.ALLOWED_HOSTS = set()
         bridge.UPDATE = None
+        bridge.AUTO_UPDATE = None
     reset()
     yield
     reset()

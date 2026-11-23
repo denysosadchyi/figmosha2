@@ -221,7 +221,7 @@ authentication beyond being on the machine.
 | Endpoint | Body | Returns |
 |---|---|---|
 | `POST /exec` | `{code, timeout?, target?, parallel?, agent?, queue_timeout?}` | `{ok, result, value, logs, elapsed_ms, notice?}` — `notice` when the plugin or bridge runs stale code |
-| `GET /status` | — | `{version, plugin_connected, plugin_version, bridge_outdated, update, files, pending, abandoned}` — each file has `plugin` and `outdated`; `update` is `{latest, current, url}` when a newer release is out |
+| `GET /status` | — | `{version, plugin_connected, plugin_version, bridge_outdated, update, auto_update, files, pending, abandoned}` — each file has `plugin` and `outdated`; `update` is `{latest, current, url}` when a newer release is out and is offered; `auto_update` is `{version, state}` while the bridge installs a release itself (state installing, installed or failed), else null |
 | `GET /targets` | — | `{files: [{name, fileKey, conn}]}` — connected Figma files |
 | `POST /clear` | `{target?, force?}` | drops a file's abandoned-script interlock |
 | `GET /` | — | service banner listing the endpoints |
@@ -344,6 +344,14 @@ list of release tags from the GitHub API (it sends nothing about you or your
 files), so the plugin bar can offer an update. Set
 `FIGMOSHA_NO_UPDATE_CHECK=1` to turn that off. `FIGMOSHA_FAKE_LATEST=9.9.9`
 pretends that version is out, without asking GitHub, to try the update UI.
+It never installs anything.
+
+In a clean `git clone` on master, the bridge installs a new release itself.
+It runs `git fetch origin tag vX.Y.Z` and `git merge --ff-only vX.Y.Z`. It runs
+pip when `requirements.txt` changed. Then it waits until nothing runs and
+restarts itself. A clone with edits in tracked files, or on another branch, is
+never touched. It gets the offer instead. Set `FIGMOSHA_NO_AUTO_UPDATE=1` to
+turn the install off on your working copy.
 
 ## Requirements
 
@@ -610,5 +618,8 @@ python tests/live_stress.py 20              # against your real open files: 20 a
 ## Changelog
 
 See [CHANGELOG.md](../CHANGELOG.md) and the [releases](https://github.com/denysosadchyi/figmosha2/releases).
-Every update ships as a `vX.Y.Z` release. To upgrade: `git pull`, restart the
-bridge, and re-run the plugin in Figma so it picks up the new `plugin/code.js`.
+Every update ships as a `vX.Y.Z` release. A clean clone on master installs it
+by itself and restarts the bridge. The chat then asks for one re-run of the
+plugin, if plugin files changed. On a developer copy, upgrade by hand: `git pull`,
+restart the bridge, and re-run the plugin in Figma so it picks up the new
+`plugin/code.js`.

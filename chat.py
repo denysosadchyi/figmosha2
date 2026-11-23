@@ -1508,8 +1508,20 @@ def _save_images(images):
     return out
 
 
+SENDING = 0     # chat.send calls in flight: the bridge does not restart under them
+
+
 async def send(doc, body):
     """Store the designer's message and queue it for Claude. Returns (status, json)."""
+    global SENDING
+    SENDING += 1
+    try:
+        return await _send(doc, body)
+    finally:
+        SENDING -= 1
+
+
+async def _send(doc, body):
     if not valid_doc(doc):
         return 400, {"ok": False, "error": "'doc' must be the file's doc id"}
     text = body.get("text") if isinstance(body.get("text"), str) else ""
