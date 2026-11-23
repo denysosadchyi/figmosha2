@@ -140,6 +140,13 @@ page. Click a task to see its layer. **Do** sends one task to the agent. **Do
 all** sends every open task. The agent marks each task as done and writes what
 it did. Remove a task when you accept the work.
 
+| Keys on a Mac | Keys on Windows | What it does |
+| --- | --- | --- |
+| **⌘⇧Enter** | **Ctrl+Shift+Enter** | Pin the text in the message field as a task on the selected layer |
+| **Esc** | **Esc** | Close the list of tasks |
+
+The keys work when the cursor is in the plugin window.
+
 On a paid Figma plan you also see the tasks on the canvas, and you can add
 them with the Figma annotation tool (**Shift+T**). On a free plan Figma does
 not show annotations on the canvas, so the tasks are only in the list. Groups

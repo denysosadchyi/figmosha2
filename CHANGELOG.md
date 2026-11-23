@@ -24,6 +24,8 @@ code it started with, so new helpers won't exist until you do. If
   Dev Mode and in a Figma without annotations the feature is hidden. On a free
   plan Figma shows no annotations on the canvas, so the tasks are seen only in
   this list; the settings page has a switch that turns the feature off.
+- **Keys for tasks.** ⌘⇧Enter on a Mac or Ctrl+Shift+Enter on Windows pins the
+  text as a task. Esc closes the list of tasks.
 - `h.notes()`, `h.note()`, `h.noteDone()`, `h.noteClear()` and `figmosha notes`,
   so an agent in a terminal can read and close the same tasks.
 

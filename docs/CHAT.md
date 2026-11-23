@@ -430,6 +430,10 @@ Errors come as `{type: "note-error", code}` with `nosel`, `unsupported`, `gone`
 or `fail`, and the UI shows a toast. These messages stay in the window: they
 never go to the bridge.
 
+Keys: in the message field ⌘⇧Enter (Mac) or Ctrl+Shift+Enter (Windows) does
+what the pin button does, and Esc closes the tasks page. Shift+Enter alone is
+still a new line.
+
 The feature shows only where it can work. `identity` carries `notes`: true in a
 design file whose Figma has `figma.annotations`, false in FigJam, Dev Mode and
 an old Figma. Without it the header icon and the pin button are hidden

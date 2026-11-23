@@ -1420,6 +1420,12 @@ $c("chatbtn").onclick = () => {
 };
 cInput.addEventListener("input", () => { grow(cInput); cmdSel = 0; if (cmdShut !== cInput.value) cmdShut = null; renderCmds(); });
 cInput.addEventListener("keydown", (e) => {
+  // ⌘⇧Enter on a Mac, Ctrl+Shift+Enter on Windows: pin the text as a task (Notes).
+  if (e.key === "Enter" && e.shiftKey && (e.metaKey || e.ctrlKey) && !e.isComposing) {
+    e.preventDefault();
+    if (rootEl.classList.contains("has-notes")) $c("cPin").click();
+    return;
+  }
   if (cmdKey(e)) { e.preventDefault(); e.stopPropagation(); return; }
   if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); cCompose.requestSubmit(); }
 });
@@ -1659,6 +1665,10 @@ $c("cPin").onclick = () => {
   parent.postMessage({ pluginMessage: { type: "note-add", text } }, "*");
 };
 LANG_HOOKS.push(renderNotes);
+// Esc closes the tasks page, like the back arrow.
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && notesOpen()) { e.preventDefault(); openNotes(false); cInput.focus(); }
+});
 // Window resize by the edge and corner zones. The UI sends the new size at
 // scale 1 with the dragged edge, at most once per frame, and done once at the end.
 // code.js clamps it, resizes the window and stores the size. A left or top edge

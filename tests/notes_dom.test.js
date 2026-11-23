@@ -100,6 +100,19 @@ async function pinTests() {
   p.pm({ type: "notes", items: NOTES.slice(0, 1), error: null, added: NOTES[0] });
   check("a text edited after the click is kept", p.$("#cInput").value, "Second, edited");
 
+  const key = (el, k, o = {}) => el.dispatchEvent(new p.w.KeyboardEvent("keydown", Object.assign({ key: k, bubbles: true, cancelable: true }, o)));
+  const pins = () => p.toCode("note-add").length;
+  let n0 = pins();
+  p.type("By keys");
+  key(p.$("#cInput"), "Enter", { shiftKey: true, metaKey: true });
+  check("Cmd+Shift+Enter pins the text", [pins(), p.toCode("note-add").pop().text, p.chatSent().length], [n0 + 1, "By keys", 0]);
+  key(p.$("#cInput"), "Enter", { shiftKey: true, ctrlKey: true });
+  check("Ctrl+Shift+Enter pins it too", pins(), n0 + 2);
+  key(p.$("#cInput"), "Enter", { shiftKey: true });
+  check("Shift+Enter alone pins nothing and sends nothing", [pins(), p.chatSent().length], [n0 + 2, 0]);
+  p.pm({ type: "notes", items: NOTES.slice(0, 1), error: null, added: NOTES[0] });
+  p.type("Second, edited");
+
   for (const [code, key] of [["nosel", "noteNoSel"], ["unsupported", "noteBadSel"], ["gone", "noteGone"], ["fail", "noteFail"]]) {
     p.pm({ type: "note-error", code });
     check(`error ${code} shows its toast`, p.toast(), p.tr(key));
@@ -164,6 +177,10 @@ async function pageTests() {
   p.push({ kind: "busy", busy: true }); p.push({ kind: "busy", busy: false }); await wait(5);
   check("no reload while the page is closed", p.toCode("notes-load").length, loads + 1);
 
+  p.$("#notebtn").click();
+  p.d.dispatchEvent(new p.w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  check("Esc closes the tasks page", p.html.classList.contains("notes-open"), false);
+
   // One page at a time, and the bar closes both.
   const closes = p.toCode("notes-close").length;
   p.$("#notebtn").click(); p.$("#setbtn").click();
@@ -190,6 +207,9 @@ async function hiddenTests() {
   on.close();
   const p = await open({ notes: false });
   check("without annotations both are hidden", [shown(p, "#notebtn"), shown(p, "#cPin")], [false, false]);
+  p.type("Hidden");
+  p.$("#cInput").dispatchEvent(new p.w.KeyboardEvent("keydown", { key: "Enter", shiftKey: true, ctrlKey: true, bubbles: true, cancelable: true }));
+  check("and the pin keys do nothing", p.toCode("note-add").length, 0);
   p.pm({ type: "identity", name: "Banner", docSig: DOC });
   check("an old code.js that says nothing keeps them hidden", [shown(p, "#notebtn"), shown(p, "#cPin")], [false, false]);
   check("and the settings have no row for them", p.$("#sNotesRow").hidden, true);
