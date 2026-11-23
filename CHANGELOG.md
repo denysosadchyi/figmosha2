@@ -10,6 +10,8 @@ code it started with, so new helpers won't exist until you do. If
 
 ## [Unreleased]
 
+## [2.5.1] — 2026-11-23
+
 ### Changed
 
 - The light over the message field is lower. It takes less space above the
