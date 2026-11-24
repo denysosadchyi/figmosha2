@@ -68,6 +68,7 @@
     --surface:#fff; --raised:#fff; --sunken:#f4f4f6; --hover:#f4f4f6; --line:#e8e8ec; --line2:#dcdce1;
           --text:#1b1b1f; --muted:#6b6f76; --faint:#8a8d95; --bubble:#fff; --bubble-me:#fff;
           --accent:#2f6af5; --accent-soft:#ebf0fe; --accent-soft-hover:#dce5fd; --accent-fill:#2f6af5; --on-accent:#fff;
+          --selection-text:#2457c9; --component-text:#7041be; --component-soft:#f1ebfc;
           --ok:#2f9e6b; --ok-soft:#e9f6ef; --warn:#d18a00; --info:#0d8ce0; --err:#d64545; --err-soft:#fcecec; --err-line:#f1caca;
           --bubble-shadow:0 1px 1px rgba(0,0,0,.04), 0 1px 4px rgba(0,0,0,.04);
           --compose-shadow:0 4px 12px rgba(0,0,0,.03), 0 16px 56px rgba(0,0,0,.06);
@@ -82,6 +83,7 @@
   :root.dark { --surface:#2c2c2c; --raised:#2c2c2c; --sunken:#1e1e1e; --hover:#383838; --line:#444444; --line2:#545454;
           --text:#ffffff; --muted:#b3b3b3; --faint:#999999; --bubble:#2c2c2c; --bubble-me:#383838;
           --accent:#0d99ff; --accent-soft:#1f3a52; --accent-soft-hover:#26496a; --accent-fill:#0a6dc2; --on-accent:#ffffff;
+          --selection-text:#7cc4f8; --component-text:#d3b0ff; --component-soft:#432e5a;
           --ok:#79d297; --ok-soft:#1d3327; --warn:#f7d15f; --info:#7cc4f8; --err:#fca397; --err-soft:#3d2622; --err-line:#6b3a31;
           --bubble-shadow:none;
           --compose-shadow:0 0 0 1px #444444; --pop-shadow:0 2px 8px rgba(0,0,0,.35);
@@ -239,6 +241,13 @@
   .qbar button, .clip { flex:none; width:32px; height:32px; padding:0; border:0; border-radius:50%; background:transparent; color:var(--muted); display:inline-flex; align-items:center; justify-content:center; cursor:pointer; }
   .qbar button svg { width:16px; height:16px; } .clip svg { width:18px; height:18px; }
   .clip:hover { color:var(--accent); }
+  .selection-row { flex:0 0 100%; min-width:0; }
+  .selection { display:flex; align-items:center; gap:6px; width:fit-content; max-width:100%; padding:3px 8px; border-radius:var(--r-sm); background:var(--accent-soft); color:var(--selection-text); font-size:12px; font-weight:600; line-height:18px; font-variant-numeric:tabular-nums; }
+  .selection[data-icon="component"] { background:var(--component-soft); color:var(--component-text); }
+  .selection[data-icon="component"] path { fill:currentColor; stroke:none; }
+  .selection svg { flex:none; width:14px; height:14px; }
+  .selection-label { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .selection-type { position:absolute; width:1px; height:1px; clip-path:inset(50%); overflow:hidden; white-space:nowrap; }
   .att { width:100%; display:flex; gap:8px; overflow-x:auto; padding:2px 0 4px; }
   .att .th { position:relative; flex:none; width:56px; height:56px; border-radius:var(--r-sm); overflow:hidden; border:1px solid var(--line); }
   .att .th img { width:100%; height:100%; object-fit:cover; display:block; }
@@ -443,6 +452,12 @@
       </div>
       <div class="qbar" id="cQbar" hidden><div><b></b><span></span></div><button type="button" id="cQbarX" aria-label="Прибрати цитату" title="Прибрати цитату"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M15 9l-6 6m0-6l6 6"/></svg></button></div>
       <div class="att" id="cAtt" hidden></div>
+      <div class="selection-row" id="cSelection" role="status" aria-live="polite" hidden>
+        <div class="selection">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span class="selection-type"></span><span class="selection-label" id="cSelectionLabel"></span>
+        </div>
+      </div>
       <div class="field">
         <button class="clip" id="cClip" type="button" title="Прикріпити фото" aria-label="Прикріпити фото"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-width="2" d="M7.9175 17.8068L15.8084 10.2535C16.7558 9.34668 16.7558 7.87637 15.8084 6.96951C14.861 6.06265 13.325 6.06265 12.3776 6.96951L4.54387 14.4681C2.74382 16.1911 2.74382 18.9847 4.54387 20.7077C6.34391 22.4308 9.26237 22.4308 11.0624 20.7077L19.0105 13.0997C21.6632 10.5605 21.6632 6.44362 19.0105 3.90441C16.3578 1.3652 12.0569 1.3652 9.40419 3.90441L3 10.0346"/></svg></button>
         <input type="file" id="cFile" accept="image/*" multiple hidden>
@@ -671,7 +686,8 @@ const I18N = {
     stUpdate: "Є нова версія {v}", stOk: "Підключено", stLinkErr: "Помилка зв'язку з мостом",
     stConn: "Підключаюсь до мосту", stSlot: ". Файл {i} з {n}",
     settings: "Налаштування", chatWith: "Чат з Claude", commands: "Команди Claude", stop: "Перервати завдання",
-    unquote: "Прибрати цитату", attach: "Прикріпити фото", placeholder: "Напиши, що зробити в цьому файлі",
+    unquote: "Прибрати цитату", attach: "Прикріпити фото", placeholder: "Напиши, що зробити в цьому файлі", selectedCount: "{n} вибрано",
+    selectedFrame: "Фрейм", selectedInstance: "Екземпляр компонента", selectedComponent: "Головний компонент", selectedComponentSet: "Набір компонентів",
     message: "Повідомлення", send: "Надіслати", back: "Назад до чату", scale: "Масштаб інтерфейсу",
     theme: "Тема", themeSystem: "Як у Figma", themeLight: "Світла", themeDark: "Темна", lang: "Мова",
     you: "Ти", system: "Система", photo: "Фото",
@@ -699,7 +715,8 @@ const I18N = {
     stUpdate: "New version {v}", stOk: "Connected", stLinkErr: "No link to the bridge",
     stConn: "Connecting to the bridge", stSlot: ". File {i} of {n}",
     settings: "Settings", chatWith: "Chat with Claude", commands: "Claude commands", stop: "Stop the task",
-    unquote: "Remove the quote", attach: "Attach a photo", placeholder: "Tell Claude what to do in this file",
+    unquote: "Remove the quote", attach: "Attach a photo", placeholder: "Tell Claude what to do in this file", selectedCount: "{n} selected",
+    selectedFrame: "Frame", selectedInstance: "Component instance", selectedComponent: "Main component", selectedComponentSet: "Component set",
     message: "Message", send: "Send", back: "Back to the chat", scale: "Interface scale",
     theme: "Theme", themeSystem: "Like Figma", themeLight: "Light", themeDark: "Dark", lang: "Language",
     you: "You", system: "System", photo: "Photo",
@@ -759,6 +776,38 @@ let ws = null;
 let reconnectTimer = null;
 const recentLog = [];
 let identity = { fileKey: null, name: null, docSig: null, pluginVersion: null };
+const SELECTION_TYPES = {
+  FRAME: ["frame", "selectedFrame"],
+  INSTANCE: ["instance", "selectedInstance"],
+  COMPONENT: ["component", "selectedComponent"],
+  COMPONENT_SET: ["component", "selectedComponentSet"],
+};
+const SELECTION_ICONS = {
+  frame: "M5 1v14M11 1v14M1 5h14M1 11h14",
+  instance: "M8 1.5 14.5 8 8 14.5 1.5 8Z",
+  component: "M8 1 11.25 4.25 8 7.5 4.75 4.25ZM4.25 4.75 7.5 8 4.25 11.25 1 8ZM11.75 4.75 15 8 11.75 11.25 8.5 8ZM8 8.5 11.25 11.75 8 15 4.75 11.75Z",
+  selection: "M2 6V2h4m4 0h4v4m0 4v4h-4m-4 0H2v-4",
+};
+let selectionCount = 0, selectionName = "", selectionNodeType = "";
+
+function renderSelection() {
+  const box = document.getElementById("cSelection");
+  const label = document.getElementById("cSelectionLabel");
+  if (!box || !label) return;
+  const count = selectionCount;
+  const [icon, typeKey] = count === 1 && Object.hasOwn(SELECTION_TYPES, selectionNodeType)
+    ? SELECTION_TYPES[selectionNodeType] : ["selection", null];
+  const prefix = typeKey ? t(typeKey) + ": " : "";
+  box.querySelector(".selection").dataset.icon = icon;
+  box.querySelector("path").setAttribute("d", SELECTION_ICONS[icon]);
+  box.querySelector(".selection-type").textContent = prefix;
+  box.hidden = count === 0;
+  label.textContent = count === 1 && selectionName.trim()
+    ? selectionName
+    : count ? t("selectedCount", { n: count }) : "";
+  label.title = prefix + label.textContent;
+}
+LANG_HOOKS.push(renderSelection);
 
 function sendHello() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
@@ -958,6 +1007,13 @@ window.onmessage = (e) => {
     // Show which file this window is bound to, once the socket is up.
     if (ws && ws.readyState === WebSocket.OPEN && identity.name) setStatus(identity.name, "ok");
     sendHello();  // (re-)register this connection under the file name
+    return;
+  }
+  if (m.type === "selection") {
+    selectionCount = Number.isSafeInteger(m.count) && m.count > 0 ? m.count : 0;
+    selectionName = typeof m.name === "string" ? m.name : "";
+    selectionNodeType = typeof m.nodeType === "string" ? m.nodeType : "";
+    renderSelection();
     return;
   }
   if (m.type === "ui-mode") { setMode(m.mode); return; }  // code.js resized the window

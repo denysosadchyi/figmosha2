@@ -37,6 +37,7 @@ const tick = (ms = 20) => new Promise((r) => setTimeout(r, ms));
 // pluginDataOff, pages, fileKey ("throw" for a getter that throws), selection, nodes, noShow.
 function loadPlugin(opt = {}) {
   const calls = { showUI: [], resize: [], posted: [], set: [], show: 0, opened: [], closed: [], pluginData: [] };
+  const listeners = {};
   // A user who finished the first-run onboarding (tests/onboard_code.test.js).
   const store = Object.assign({ "figmosha-onboarded": 1 }, opt.store || {});
   const pluginData = Object.assign({ "figmosha-welcome": "1" }, opt.pluginData || {});
@@ -50,6 +51,7 @@ function loadPlugin(opt = {}) {
   const figma = {
     showUI(html, o) { calls.showUI.push(o); },
     ui,
+    on(event, fn) { (listeners[event] || (listeners[event] = [])).push(fn); },
     clientStorage: {
       async getAsync(k) { if (off === true || off === "get") throw new Error("off"); return store[k]; },
       async setAsync(k, v) { if (off === true || off === "set") throw new Error("off"); store[k] = v; calls.set.push([k, v]); },
@@ -74,7 +76,8 @@ function loadPlugin(opt = {}) {
   const c = opt.clock || { setTimeout, clearTimeout, setInterval, clearInterval };
   const HELPERS = new Function("figma", "__html__", "setTimeout", "clearTimeout", "setInterval", "clearInterval",
     SRC + "\nreturn HELPERS;")(figma, "<html>", c.setTimeout, c.clearTimeout, c.setInterval, c.clearInterval);
-  return { figma, calls, store, pluginData, HELPERS };
+  return { figma, calls, store, pluginData, HELPERS,
+    emit(event) { (listeners[event] || []).forEach((fn) => fn()); } };
 }
 
 // A fake clock for code.js timers: tick(ms) moves it on and runs what is due. No real wait.
@@ -150,6 +153,29 @@ async function modeTests() {
   const off = p.calls.resize[p.calls.resize.length - 1] || [0, 0];
   check("storage off: opens as the bar", p.calls.showUI[0].height, BAR[1]);
   check("storage off: the chat still opens", off, CHAT);
+}
+
+async function selectionTests() {
+  const p = loadPlugin({ selection: [{ name: "Card", type: "FRAME" }] });
+  const latest = () => ofType(p, "selection").pop();
+  const select = (...nodes) => {
+    p.figma.currentPage.selection = nodes;
+    p.emit("selectionchange");
+  };
+  await tick();
+  check("startup reports the selected frame's name and type", latest(),
+        { type: "selection", count: 1, name: "Card", nodeType: "FRAME" });
+  for (const nodeType of ["INSTANCE", "COMPONENT", "COMPONENT_SET"]) {
+    select({ name: "Card", type: nodeType });
+    check("selection reports " + nodeType + " even when the name is unchanged", latest(),
+          { type: "selection", count: 1, name: "Card", nodeType });
+  }
+  select({ name: "A", type: "FRAME" }, { name: "B", type: "INSTANCE" });
+  check("multiple nodes report their count, not a single type or name", latest(),
+        { type: "selection", count: 2, name: "", nodeType: "" });
+  select();
+  check("clearing the selection reports zero", latest(),
+        { type: "selection", count: 0, name: "", nodeType: "" });
 }
 
 // Settings page: scale and theme, stored per user, sent to the UI on start.
@@ -633,7 +659,7 @@ function slashTests() {
 }
 
 (async () => {
-  for (const [name, fn] of [["window mode", modeTests], ["settings", settingsTests], ["notice", noticeTests],
+  for (const [name, fn] of [["window mode", modeTests], ["selection", selectionTests], ["settings", settingsTests], ["notice", noticeTests],
                             ["identity", identityTests], ["window", windowTests], ["settings edges", settingsEdgeTests],
                             ["notice edges", noticeEdgeTests], ["messages", miscMessageTests], ["exec", execTests],
                             ["ChatCore", coreTests], ["slash commands", slashTests]]) {

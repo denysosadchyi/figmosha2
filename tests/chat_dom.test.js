@@ -186,6 +186,42 @@ async function loadAndModes() {
   e.close();
 }
 
+async function selectionChip() {
+  const p = await open();
+  const row = p.$("#cSelection"), chip = row.querySelector(".selection"), label = p.$("#cSelectionLabel");
+  const kind = () => row.querySelector(".selection-type").textContent;
+  const name = "Personalized Homepage / Chart";
+  check("selection chip starts hidden", row.hidden, true);
+  same("selection has its own row above the prompt controls", row.nextElementSibling, p.input.parentElement);
+  p.pm({ type: "settings", scale: 1, theme: "system", lang: "en" }); await wait();
+  for (const [nodeType, icon, key] of [
+    ["FRAME", "frame", "selectedFrame"],
+    ["INSTANCE", "instance", "selectedInstance"],
+    ["COMPONENT", "component", "selectedComponent"],
+    ["COMPONENT_SET", "component", "selectedComponentSet"],
+  ]) {
+    p.pm({ type: "selection", count: 1, name, nodeType }); await wait();
+    check(nodeType + " shows its name, icon, and accessible type",
+          [row.hidden, label.textContent, chip.dataset.icon, kind()], [false, name, icon, p.tr(key) + ": "]);
+  }
+  p.pm({ type: "settings", scale: 1, theme: "system", lang: "uk" }); await wait();
+  check("a named chip localizes its type and keeps the full name in its tooltip",
+        label.title, p.tr("selectedComponentSet") + ": " + name);
+  p.pm({ type: "selection", count: 1, name, nodeType: "TEXT" }); await wait();
+  check("another layer type shows its name with a generic icon",
+        [label.textContent, chip.dataset.icon, kind()], [name, "selection", ""]);
+  p.pm({ type: "selection", count: 4 }); await wait();
+  check("multiple selection shows its localized count and a generic icon",
+        [row.hidden, label.textContent, chip.dataset.icon], [false, p.tr("selectedCount", { n: 4 }), "selection"]);
+  p.pm({ type: "settings", scale: 1, theme: "system", lang: "en" }); await wait();
+  check("selection count follows the interface language", label.textContent, p.tr("selectedCount", { n: 4 }));
+  p.pm({ type: "selection", count: 0 }); await wait();
+  check("clearing selection hides the row", row.hidden, true);
+  check("the chip is an announced status", row.getAttribute("aria-live"), "polite");
+  check("no script errors", p.errors, []);
+  p.close();
+}
+
 async function sending() {
   const p = await open();
   p.type("Зроби кнопку синьою");
@@ -1918,7 +1954,7 @@ async function codexSlash() {
 }
 
 (async () => {
-  for (const t of [loadAndModes, sending, photos, quotes, actionsAndQuestions, busyStreamStop, errorStates, scrolling, settingsScroll,
+  for (const t of [loadAndModes, selectionChip, sending, photos, quotes, actionsAndQuestions, busyStreamStop, errorStates, scrolling, settingsScroll,
                    statusIcon, settings, language, updateBar, updateCard, rerunCard, slashCommands, safety,
                    composeKeys, markdown, streaming, typingState, photoRemoval, quoteEdges, actionEdges, questionEdges, historyLoads, emptyStates, toasts,
                    helloAndIdentity, relay, iconPriority, updateButton, reconnects, staleCloseAfterVisible, modes, settingsEdges, slashAria,

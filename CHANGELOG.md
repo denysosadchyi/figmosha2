@@ -10,6 +10,11 @@ code it started with, so new helpers won't exist until you do. If
 
 ## [Unreleased]
 
+### Added
+
+- The chat composer shows the selected layer or selection count above the
+  prompt. Frames, component instances, and main components have distinct icons.
+
 ## [2.6.0] — 2026-11-23
 
 ### Changed
