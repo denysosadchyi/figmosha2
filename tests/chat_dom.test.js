@@ -610,7 +610,7 @@ async function settings() {
   check("each language option carries its own lang", sel("lang") ? [...sel("lang").options].map((o) => o.lang) : [], ["uk", "en"]);
   check("no radio buttons and no cards on the page", p.d.querySelectorAll("#settings [role=radio], #settings .seg, #settings .sgroup").length, 0);
   const rows = [...p.d.querySelectorAll("#settings .srow")];
-  check("one row for each of the six settings", rows.length, 6);
+  check("one row for each of the seven settings (the notes row shows only where notes work)", rows.length, 7);
   truthy("every select sits in a row", [...p.d.querySelectorAll("#settings select")].every((s) => s.closest(".srow")));
   const cs = (el) => p.w.getComputedStyle(el);
   const flat = (v) => !v || v === "none" || v === "transparent" || v === "initial" || /^rgba\(0, 0, 0, 0\)$/.test(v);

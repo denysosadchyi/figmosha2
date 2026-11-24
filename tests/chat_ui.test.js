@@ -236,8 +236,8 @@ async function identityTests() {
   let p = loadPlugin({ fileKey: "abc", pluginData: { "figmosha-doc": "dKeep" } });
   const id = ofType(p, "identity");
   check("identity is posted once on load", id.length, 1);
-  check("identity carries file key, name, doc id and the build",
-        id[0], { type: "identity", fileKey: "abc", name: "Banner", docSig: "dKeep", pluginVersion: VERSION });
+  check("identity carries file key, name, doc id, the build and whether notes work here",
+        id[0], { type: "identity", fileKey: "abc", name: "Banner", docSig: "dKeep", pluginVersion: VERSION, notes: false });
   check("an existing doc id is not rewritten", p.calls.pluginData, []);
 
   await send(p, { type: "need-identity" });

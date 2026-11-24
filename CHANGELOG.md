@@ -10,6 +10,25 @@ code it started with, so new helpers won't exist until you do. If
 
 ## [Unreleased]
 
+### Added
+
+- **Notes: tasks pinned to layers.** Select a layer, write what to do in the
+  message field and press the pin button next to it. The task shows on the
+  canvas as a Figma annotation in the category `Figmosha`. It is not a layer and
+  it does not show in exports. The plugin writes annotations on any plan.
+- **The tasks page.** The new icon in the plugin header opens the list of tasks
+  on the current page. A click on a task shows its layer. Do sends one task to
+  the chat, Do all sends every open task. The agent does them in order and marks
+  each one as done with a line about what it did. Remove a task when you accept
+  the work. The list follows the canvas while it is open. In FigJam, in
+  Dev Mode and in a Figma without annotations the feature is hidden. On a free
+  plan Figma shows no annotations on the canvas, so the tasks are seen only in
+  this list; the settings page has a switch that turns the feature off.
+- **Keys for tasks.** ⌘⇧Enter on a Mac or Ctrl+Shift+Enter on Windows pins the
+  text as a task. Esc closes the list of tasks.
+- `h.notes()`, `h.note()`, `h.noteDone()`, `h.noteClear()` and `figmosha notes`,
+  so an agent in a terminal can read and close the same tasks.
+
 ## [2.6.0] — 2026-11-23
 
 ### Changed

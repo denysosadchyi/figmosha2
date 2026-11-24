@@ -30,6 +30,8 @@ The agent reads the file, changes it and tells you what it did. You can:
   click sends that choice.
 - **Answer questions.** The agent can ask questions. Each question has its own
   answer field.
+- **Pin tasks to layers.** Select a layer, write what to do and press the pin
+  button. The agent does the tasks one by one.
 - **Use commands.** Type `/` to see the commands. `/clear` starts a new
   conversation in the same file.
 
@@ -122,6 +124,34 @@ new message while the agent works. It waits and goes next.
 To make the chat window bigger or smaller, drag any edge or corner. The chat
 remembers its size and its place on the screen.
 
+### Tasks on the canvas
+
+You can leave a task on a layer and do it later.
+
+1. Select a frame, a shape, a text or a component.
+2. Write the task in the message field.
+3. Press the pin button next to the clip button.
+
+The task is saved in the file as a Figma annotation in the category
+`Figmosha`. It is not a layer and it does not show in exports.
+
+The tasks icon in the plugin header opens the list of tasks on the current
+page. Click a task to see its layer. **Do** sends one task to the agent. **Do
+all** sends every open task. The agent marks each task as done and writes what
+it did. Remove a task when you accept the work.
+
+| Keys on a Mac | Keys on Windows | What it does |
+| --- | --- | --- |
+| **⌘⇧Enter** | **Ctrl+Shift+Enter** | Pin the text in the message field as a task on the selected layer |
+| **Esc** | **Esc** | Close the list of tasks |
+
+The keys work when the cursor is in the plugin window.
+
+On a paid Figma plan you also see the tasks on the canvas, and you can add
+them with the Figma annotation tool (**Shift+T**). On a free plan Figma does
+not show annotations on the canvas, so the tasks are only in the list. Groups
+and sections cannot hold a task. FigJam has no tasks.
+
 ### Settings
 
 <img width="760" alt="The Figmosha settings page over the Figma canvas, with six rows, each with a dropdown: Interface scale 100%, Theme Light, Language English, Agent Claude Code, Model Opus, Effort Medium." src="docs/img/settings.png" />
@@ -137,6 +167,9 @@ Click the gear icon next to the chat icon to open the settings.
 - **Model:** the models of the selected agent.
 - **Effort:** how hard the agent thinks. More effort is slower. The default is
   Opus with medium effort.
+
+- **Tasks on the canvas:** On or Off. Off hides the tasks icon and the pin
+  button.
 
 The settings apply to all your files.
 

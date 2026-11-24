@@ -8,6 +8,7 @@ Commands:
     figmosha status                   # check server / plugin connection
     figmosha doctor                   # diagnose the whole chain, with fixes
     figmosha sel                      # what is selected in Figma right now
+    figmosha notes                    # tasks pinned to nodes on the current page
     figmosha tree <id> [--depth N] [--layout]
     figmosha find <id> <filter>       # find descendants (name=X, name~X, type=X, text=X)
     figmosha text <id> "<new text>"   # set TEXT node characters (autoloads font)
@@ -32,6 +33,8 @@ Helpers available inside exec'd code (as `h.*`):
     h.frame(parent, {layout, w, h, spacing, padding, align, fill, radius, name})
     h.node(id)                  h.var_(idOrKey)
     h.importComp(key)           h.importVar(key)
+    h.notes()                   h.note(nodeOrId, text)
+    h.noteDone(nodeOrId, reply, i?)   h.noteClear(nodeOrId, i?)
 """
 
 import argparse
@@ -55,7 +58,7 @@ AGENT = os.environ.get("FIGMOSHA_AGENT") or None  # who is calling, shown in the
 QUEUE_TIMEOUT = None  # max seconds to wait for a busy file; bridge default = --timeout
 
 KNOWN_CMDS = {
-    "exec", "status", "targets", "clear", "doctor", "sel", "tree", "find", "text", "variant",
+    "exec", "status", "targets", "clear", "doctor", "sel", "notes", "tree", "find", "text", "variant",
     "clone", "rm", "import-component", "icomp",
 }
 
@@ -187,6 +190,10 @@ def cmd_clear(args):
 
 def cmd_sel(args):
     return _emit(_exec("return h.sel();", args.timeout)[1], raw=args.raw)
+
+
+def cmd_notes(args):
+    return _emit(_exec("return await h.notes();", args.timeout)[1], raw=args.raw)
 
 
 def cmd_doctor(args):
@@ -462,6 +469,9 @@ def build_parser():
     p_sel = sub.add_parser("sel", help="what is selected in Figma right now")
     _add_common_flags(p_sel)
 
+    p_notes = sub.add_parser("notes", help="tasks pinned to nodes on the current page")
+    _add_common_flags(p_notes)
+
     p_exec = sub.add_parser("exec")
     _add_common_flags(p_exec)
     g = p_exec.add_mutually_exclusive_group()
@@ -548,6 +558,7 @@ def main():
         "clear": cmd_clear,
         "doctor": cmd_doctor,
         "sel": cmd_sel,
+        "notes": cmd_notes,
         "exec": cmd_exec,
         "tree": cmd_tree,
         "find": cmd_find,

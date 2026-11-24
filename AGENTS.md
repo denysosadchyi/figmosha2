@@ -172,6 +172,10 @@ The plugin runtime exposes a small helper namespace. Use these to keep scripts s
 | `await h.var_(idOrKey)` | Resolve a variable from instance, local id, or library key |
 | `await h.importComp(key)` | `figma.importComponentByKeyAsync(key)` |
 | `await h.importVar(key)` | `figma.variables.importVariableByKeyAsync(key)` |
+| `await h.notes()` | Notes (pinned tasks) on the current page: `[{id, i, name, type, text, done, reply}]` |
+| `await h.note(nodeOrId, text)` | Pin a note with a task to a node (`"sel"` works) |
+| `await h.noteDone(nodeOrId, reply, i?)` | Mark the open notes of a node as done (only note `i` when given) and say what was done |
+| `await h.noteClear(nodeOrId, i?)` | Remove the notes of a node (only note `i` when given) |
 
 **Use them.** Compared to inline boilerplate, helpers save ~70% of the script and avoid common mistakes (frozen `node.fills`, missing `loadFontAsync`, etc.).
 
@@ -214,6 +218,7 @@ await h.withFonts(root, async () => {
 |---|---|---|
 | `figmosha doctor` | — | Diagnose bridge → plugin → Figma, with the fix for each break |
 | `figmosha sel` | `h.sel()` | What the user has selected right now |
+| `figmosha notes` | `h.notes()` | Tasks the user pinned to nodes on the current page |
 | `figmosha tree <id>` | `h.dumpTree(await h.node(id))` | Explore node structure |
 | `figmosha find <id> name=Button` | `(await h.node(id)).findAll(n => n.name === "Button")` | Locate by name |
 | `figmosha find <id> name~Btn` | `findAll(n => n.name.includes("Btn"))` | Substring name match |
@@ -232,6 +237,21 @@ Use subcommands when the op fits one of these. Fall back to `exec` for anything 
 
 When the user says "this frame" or "the selected one", call `figmosha sel` — don't
 ask them to find an id by hand.
+
+## Notes: tasks pinned to nodes
+
+A note is a task the user pinned to a node. It is a native Figma annotation in the
+category `Figmosha`, so it shows on the canvas next to the node. `id` is the node id,
+`i` is the index of the annotation on that node.
+
+- "Do the notes", "work through the comments" → `figmosha notes`, then do each note with
+  `done: false` on its node, in order.
+- After each task call `await h.noteDone("<id>", "<what you did>", <i>)` in the same exec as
+  the last write. The note moves to the category `Figmosha · done` and keeps your reply.
+  Do not remove a note yourself: the user removes it when they accept the work.
+- A note says what to do **on its node**. If the text is not clear, ask in the chat and
+  leave the note open.
+- Groups, sections and pages cannot hold a note: pin it to a frame or a layer inside.
 
 ## How exec evaluates code
 

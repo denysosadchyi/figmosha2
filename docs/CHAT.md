@@ -391,6 +391,61 @@ dy*(sh-ch)/(ch-thumb), with dy divided by the html zoom (UI scale) taken from
 getBoundingClientRect/offsetHeight, so the thumb tracks the pointer at any scale; a
 click does not jump. The `.cmds` popup keeps a thin native bar.
 
+### Notes
+
+A note is a task pinned to a node. It is a native Figma annotation
+(`node.annotations`) in the category `Figmosha` (violet), so Figma draws it on
+the canvas next to the node: it is not a layer and it is not in exports. A done
+note is in the category `Figmosha · done` (green); its label is the task, then
+`\n\n✓ ` and the agent's reply. code.js creates both categories on the first
+use. The plugin API writes annotations on any plan (the Figma tool itself needs
+a paid plan and a Full seat), so the plugin window is the way to add a note.
+Annotations exist on frames, components, instances, shapes and text; a group, a
+section or a page gives the toast На цей шар не можна.
+
+Helpers (`h.notes`, `h.note`, `h.noteDone`, `h.noteClear`) and `figmosha notes`
+are in AGENTS.md. `h.notes()` scans the current page once (about 2 s on 60k
+nodes), so the list loads when asked for, never on its own.
+
+Window. The pin button `#cPin` in the message field sends
+`{type: "note-add", text}` to code.js with the typed text; code.js pins it to
+the first selected node and answers `{type: "notes", items, error, added}`. The
+field is cleared only if it still holds that text. The icon `#notebtn` in the
+header (chat mode only) opens the page `#notes` (`html.notes-open`), which
+replaces the chat like the settings page; only one of the two pages is open.
+On open, and when a turn ends while the page is open, the UI sends
+`{type: "notes-load"}`. From then until `{type: "notes-close"}` code.js follows
+the canvas (`nodechange` of the current page, and the page switch) and sends
+the list again when an annotation, a name, or the set of nodes changes, so a
+note written in Figma itself, by the agent or from the CLI shows up at once.
+Scans are spaced by three times the last scan, at least 300 ms. Rows: the node name, the task, the reply of a done
+note. A click on a row sends `{type: "note-focus", id}` (select and zoom). Do
+(`data-n="run"`) and Do all (`#nRunAll`, open notes only) send one ordinary
+chat message built by `ChatCore.notePrompt(items, lang)`: the tasks with their
+node ids and note indexes, and the `h.noteDone` call to make after each one.
+So there is no second queue: the chat already does messages in order. Remove
+(`data-n="rm"`) sends `{type: "note-remove", id, i, text}`; code.js removes the
+note only where the text still matches, because the list can be stale.
+Errors come as `{type: "note-error", code}` with `nosel`, `unsupported`, `gone`
+or `fail`, and the UI shows a toast. These messages stay in the window: they
+never go to the bridge.
+
+Keys: in the message field ⌘⇧Enter (Mac) or Ctrl+Shift+Enter (Windows) does
+what the pin button does, and Esc closes the tasks page. Shift+Enter alone is
+still a new line.
+
+The feature shows only where it can work. `identity` carries `notes`: true in a
+design file whose Figma has `figma.annotations`, false in FigJam, Dev Mode and
+an old Figma. Without it the header icon and the pin button are hidden
+(`html.has-notes` shows them). A plugin cannot read the plan or the seat, and
+it does not need to: it writes annotations on any plan. But on a free plan
+Figma draws no annotations on the canvas (the notes then live only in the tasks
+page), so the user can switch the feature off: the settings page has the row
+`#sNotesRow` with the dropdown `#sNotes` (On, Off), shown only where notes can
+work. The choice goes to code.js as `{type: "notes-setting", on}`, is stored in
+`clientStorage` under `figmosha-notes` and comes back in the same message on
+start. It is a message of its own, so `settings` keeps its shape.
+
 ### Welcome screen
 
 The first time a Figma file opens the plugin, the chat window shows a welcome

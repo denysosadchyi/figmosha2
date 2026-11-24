@@ -7,7 +7,7 @@ figma.showUI(__html__, { width: 220, height: 28, title: "Figmosha", themeColors:
 // disk and asks for a re-Run when they differ, because a running plugin keeps
 // the code it started with. Bump it on every change to plugin/ —
 // python3 tools/bump_plugin.py does it (or the tools/pre-commit hook).
-const PLUGIN_VERSION = "2026-11-23.4";
+const PLUGIN_VERSION = "2026-11-23.11";
 
 // Tell the UI which file we're in, so it can register this connection with the
 // bridge by name (figma.root.name). The bridge routes --target by that name.
@@ -20,7 +20,17 @@ function postIdentity() {
     name: figma.root.name,
     docSig: docSignature(),
     pluginVersion: PLUGIN_VERSION,
+    notes: notesHere(),
   });
+}
+// Notes need the annotations of a design file: FigJam, Dev Mode and an old
+// Figma have none, and there the window hides the feature.
+function notesHere() {
+  try {
+    const api = figma.annotations;
+    return figma.editorType !== "figjam" && figma.editorType !== "dev"
+      && !!api && typeof api.getAnnotationCategoriesAsync === "function";
+  } catch (e) { return false; }
 }
 
 // `figma.fileKey` is null for a local dev plugin and `figma.root.id` is "0:0" in
@@ -83,6 +93,7 @@ let chatSize = UI_MODES.chat.slice();
 let uiMode = "bar";
 let uiScale = 1;
 let uiLang = "uk";
+const NOTES_SET_KEY = "figmosha-notes";   // "off" when the user switched the notes off
 function cleanSettings(s) {
   s = s && typeof s === "object" ? s : {};
   return {
@@ -266,6 +277,11 @@ async function onboardingDone() {
     uiScale = s.scale;
     uiLang = s.lang;
     figma.ui.postMessage({ type: "settings", scale: s.scale, theme: s.theme, lang: s.lang });
+    // The user can switch the notes off (settings page): on a free plan Figma
+    // draws no annotations on the canvas, so some do not want the feature.
+    let notesOff = null;
+    try { notesOff = await figma.clientStorage.getAsync(NOTES_SET_KEY); } catch (e) { /* storage off */ }
+    figma.ui.postMessage({ type: "notes-setting", on: notesOff !== "off" });
     // Separate messages, so "settings" keeps its old shape for older UIs.
     // The onboarding comes first and replaces the welcome on its run.
     const onboarding = !onboarded;
@@ -637,6 +653,16 @@ const HELPERS = {
     return await figma.getNodeByIdAsync(idOrAlias);
   },
 
+  // Notes: tasks pinned to nodes as annotations of the "Figmosha" category.
+  // notes() lists the current page: [{id, i, name, type, text, done, reply}].
+  async notes() { return await listNotes(); },
+  // Pin a note with a task to a node (a node, an id, or "sel").
+  async note(nodeOrId, text) { return await addNote(nodeOrId, text); },
+  // Mark the open notes of a node as done and say what was done.
+  async noteDone(nodeOrId, reply, i) { return await doneNote(nodeOrId, reply, i); },
+  // Remove the notes of a node.
+  async noteClear(nodeOrId, i) { return await clearNote(nodeOrId, i); },
+
   // Quick async accessors
   async node(id)      { return await figma.getNodeByIdAsync(id); },
   async var_(idOrKey) { return await resolveVar(idOrKey); },
@@ -644,6 +670,209 @@ const HELPERS = {
   async importVar(key)  { return await figma.variables.importVariableByKeyAsync(key); },
 };
 
+// ─── Notes: tasks pinned to nodes (docs/CHAT.md, Notes) ───────────────────
+// A note is a native Figma annotation in the category "Figmosha" on the node
+// it is about, so it shows on the canvas and is not a layer. A done note moves
+// to the category "Figmosha · done" and keeps the agent's reply after DONE_SEP.
+// The plugin API writes annotations on any plan; the Figma tool itself needs a
+// paid seat, so the plugin window is the way to add one for everybody.
+const NOTE_CATS = {
+  open: { label: "Figmosha", color: "violet" },
+  done: { label: "Figmosha · done", color: "green" },
+};
+const NOTE_TYPES = ["COMPONENT", "COMPONENT_SET", "ELLIPSE", "FRAME", "INSTANCE", "LINE",
+                    "POLYGON", "RECTANGLE", "STAR", "TEXT", "VECTOR"];
+const NOTE_MAX = 2000;
+const DONE_SEP = "\n\n✓ ";
+
+// {open, done}: the category ids, or null where the file has none yet.
+async function noteCats(create) {
+  const api = figma.annotations;
+  if (!api || typeof api.getAnnotationCategoriesAsync !== "function") {
+    throw new Error("notes: this Figma has no annotations");
+  }
+  const cats = await api.getAnnotationCategoriesAsync();
+  const out = { open: null, done: null };
+  for (const k of ["open", "done"]) {
+    let c = cats.find((x) => x.label === NOTE_CATS[k].label);
+    if (!c && create) c = await api.addAnnotationCategoryAsync({ label: NOTE_CATS[k].label, color: NOTE_CATS[k].color });
+    out[k] = c ? c.id : null;
+  }
+  return out;
+}
+const noteAble = (n) => !!n && NOTE_TYPES.indexOf(n.type) >= 0 && "annotations" in n;
+// node.annotations is read-only and frozen: copy what a write accepts.
+function plainAnnotation(a) {
+  const o = {};
+  if (a.labelMarkdown) o.labelMarkdown = a.labelMarkdown;
+  else if (a.label) o.label = a.label;
+  if (a.properties && a.properties.length) o.properties = a.properties.map((p) => ({ type: p.type }));
+  if (a.categoryId) o.categoryId = a.categoryId;
+  return o;
+}
+function noteOf(node, a, i, cats) {
+  const done = !!cats.done && a.categoryId === cats.done;
+  if (!done && !(cats.open && a.categoryId === cats.open)) return null;
+  // Figma rewrites the label of a note it stored as markdown and can add a line
+  // break before the reply, so the separator is matched loosely and both parts trimmed.
+  const raw = String(a.label || ""), m = done ? /\n{2,}✓ /.exec(raw) : null;
+  return {
+    id: node.id, i: i, name: node.name, type: node.type, done: done,
+    text: (m ? raw.slice(0, m.index) : raw).trim(),
+    reply: m ? raw.slice(m.index + m[0].length).trim() : "",
+  };
+}
+// Every note on the current page, in layer order. One scan of the page: about
+// 2 s on 60k nodes, so it runs when asked for, never on its own.
+async function listNotes() {
+  const cats = await noteCats(false);
+  if (!cats.open && !cats.done) return [];
+  const page = figma.currentPage;
+  const nodes = typeof page.findAllWithCriteria === "function"
+    ? page.findAllWithCriteria({ types: NOTE_TYPES })
+    : page.findAll((n) => NOTE_TYPES.indexOf(n.type) >= 0);
+  const out = [];
+  for (const n of nodes) {
+    const list = n.annotations;
+    if (!list || !list.length) continue;
+    for (let i = 0; i < list.length; i++) {
+      const note = noteOf(n, list[i], i, cats);
+      if (note) out.push(note);
+    }
+  }
+  return out;
+}
+async function noteNode(nodeOrId, who) {
+  const node = typeof nodeOrId === "string" ? await HELPERS.resolve(nodeOrId) : nodeOrId;
+  if (!node) throw new Error(who + ": node not found: " + nodeOrId);
+  if (!noteAble(node)) {
+    throw new Error(who + ": a " + node.type + " cannot hold a note; use a frame, an instance, a shape or a text inside it");
+  }
+  return node;
+}
+async function addNote(nodeOrId, text) {
+  const node = await noteNode(nodeOrId, "h.note");
+  const t = String(text == null ? "" : text).trim().slice(0, NOTE_MAX);
+  if (!t) throw new Error("h.note: the note has no text");
+  const cats = await noteCats(true);
+  node.annotations = (node.annotations || []).map(plainAnnotation).concat([{ label: t, categoryId: cats.open }]);
+  return noteOf(node, node.annotations[node.annotations.length - 1], node.annotations.length - 1, cats);
+}
+// Mark the open notes of a node as done (all of them, or the one at index i).
+async function doneNote(nodeOrId, reply, i) {
+  const node = await noteNode(nodeOrId, "h.noteDone");
+  const cats = await noteCats(true);
+  const r = String(reply == null ? "" : reply).trim().slice(0, NOTE_MAX);
+  let n = 0;
+  const next = (node.annotations || []).map((a, k) => {
+    if (a.categoryId !== cats.open || (i != null && i !== k)) return plainAnnotation(a);
+    n++;
+    return { label: String(a.label || "") + (r ? DONE_SEP + r : ""), categoryId: cats.done };
+  });
+  if (!n) throw new Error("h.noteDone: '" + node.name + "' has no open note");
+  node.annotations = next;
+  return n;
+}
+// Remove the notes of a node (all of them, or the one at index i). Other annotations stay.
+async function clearNote(nodeOrId, i) {
+  const node = await noteNode(nodeOrId, "h.noteClear");
+  const cats = await noteCats(false);
+  const mine = (a) => (!!cats.open && a.categoryId === cats.open) || (!!cats.done && a.categoryId === cats.done);
+  const all = node.annotations || [];
+  const next = all.filter((a, k) => !(mine(a) && (i == null || i === k)));
+  if (next.length !== all.length) node.annotations = next.map(plainAnnotation);
+  return all.length - next.length;
+}
+
+// The plugin window side: {type: "notes-load"} (the page opened), {type: "notes-close"},
+// {type: "note-add", text} (on the selection),
+// {type: "note-focus", id}, {type: "note-remove", id, i, text}.
+// Answers are "notes" (the list) and "note-error" (a code the UI words).
+async function postNotes(extra) {
+  let items = [], error = null;
+  try { items = await listNotes(); } catch (e) { error = "noapi"; }
+  figma.ui.postMessage(Object.assign({ type: "notes", items: items, error: error }, extra || {}));
+}
+// While the tasks page is open, the list follows the canvas: a note written in
+// Figma itself, by the agent or from the CLI shows up without a reload. Only
+// changes that can alter the list count, and a slow scan (a huge page) waits longer.
+let noteWatch = null;   // {page, fn, pageFn} while the tasks page is open
+let noteTimer = null, noteCost = 0;
+function noteTouches(e) {
+  const list = (e && e.nodeChanges) || [];
+  for (let k = 0; k < list.length; k++) {
+    const c = list[k], props = c.properties || [];
+    if (c.type !== "PROPERTY_CHANGE" || props.indexOf("annotations") >= 0 || props.indexOf("name") >= 0) return true;
+  }
+  return false;
+}
+function noteRescan() {
+  if (noteTimer || !noteWatch) return;
+  noteTimer = setTimeout(async () => {
+    noteTimer = null;
+    if (!noteWatch) return;
+    const t0 = Date.now();
+    await postNotes();
+    noteCost = Date.now() - t0;
+  }, Math.max(300, noteCost * 3));
+}
+function noteWatchPage() {
+  const w = noteWatch;
+  if (!w) return;
+  try { if (w.page) w.page.off("nodechange", w.fn); } catch (e) {}
+  w.page = figma.currentPage;
+  try { w.page.on("nodechange", w.fn); } catch (e) { w.page = null; }
+}
+function watchNotes(on) {
+  if (on === !!noteWatch) return;
+  if (on) {
+    noteWatch = { page: null, fn: (e) => { if (noteTouches(e)) noteRescan(); }, pageFn: () => { noteWatchPage(); noteRescan(); } };
+    noteWatchPage();
+    try { figma.on("currentpagechange", noteWatch.pageFn); } catch (e) {}
+    return;
+  }
+  const w = noteWatch;
+  noteWatch = null;
+  if (noteTimer) { clearTimeout(noteTimer); noteTimer = null; }
+  try { if (w.page) w.page.off("nodechange", w.fn); } catch (e) {}
+  try { figma.off("currentpagechange", w.pageFn); } catch (e) {}
+}
+async function noteMessage(msg) {
+  try {
+    if (msg.type === "notes-load") watchNotes(true);
+    if (msg.type === "notes-close") { watchNotes(false); return; }
+    if (msg.type === "note-add") {
+      const s = figma.currentPage.selection;
+      if (!s.length) { figma.ui.postMessage({ type: "note-error", code: "nosel" }); return; }
+      if (!noteAble(s[0])) { figma.ui.postMessage({ type: "note-error", code: "unsupported", name: s[0].name }); return; }
+      const note = await addNote(s[0], msg.text);
+      await postNotes({ added: note });
+      return;
+    }
+    if (msg.type === "note-focus") {
+      const node = await figma.getNodeByIdAsync(String(msg.id));
+      if (!node || node.removed) { figma.ui.postMessage({ type: "note-error", code: "gone" }); await postNotes(); return; }
+      figma.currentPage.selection = [node];
+      figma.viewport.scrollAndZoomIntoView([node]);
+      return;
+    }
+    if (msg.type === "note-remove") {
+      // The window's list can be stale (the agent or the user changed the notes
+      // since), so the index alone could hit another note: the text must match.
+      const node = await figma.getNodeByIdAsync(String(msg.id));
+      const cats = await noteCats(false);
+      const list = node && !node.removed && noteAble(node) ? node.annotations || [] : [];
+      const at = (k) => { const n = list[k] && noteOf(node, list[k], k, cats); return !!n && n.text === msg.text; };
+      let i = typeof msg.i === "number" && at(msg.i) ? msg.i : -1;
+      for (let k = 0; i < 0 && k < list.length; k++) if (at(k)) i = k;
+      if (i < 0) figma.ui.postMessage({ type: "note-error", code: "gone" });
+      else await clearNote(node, i);
+    }
+    await postNotes();
+  } catch (e) {
+    figma.ui.postMessage({ type: "note-error", code: "fail", text: (e && e.message) || String(e) });
+  }
+}
 // ──────────────────────────────────────────────────────────────────────────
 
 // Ids the bridge gave up waiting for. A running script cannot be killed, so
@@ -660,9 +889,18 @@ figma.ui.onmessage = async (msg) => {
   }
   if (msg.type === "ui-mode") { await setUiMode(msg.mode, true); return; }
   if (msg.type === "settings") { await setSettings(msg); return; }
+  if (msg.type === "notes-setting") {
+    if (msg.on !== true) watchNotes(false);
+    try { await figma.clientStorage.setAsync(NOTES_SET_KEY, msg.on === true ? "on" : "off"); } catch (e) { /* storage off */ }
+    return;
+  }
   if (msg.type === "welcome-done") { welcomeDone(); return; }
   if (msg.type === "onboarding-done") { await onboardingDone(); return; }
   if (msg.type === "resize") { await setChatSize(msg); return; }
+  if (msg.type === "notes-load" || msg.type === "notes-close" || msg.type === "note-add" || msg.type === "note-focus" || msg.type === "note-remove") {
+    await noteMessage(msg);
+    return;
+  }
   if (msg.type === "open-url") {
     // The Update button. Only ever the project's GitHub pages: the slash keeps out
     // look-alike repos such as figmosha2evil.
